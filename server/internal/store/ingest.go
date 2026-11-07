@@ -255,13 +255,16 @@ func (s *Store) CompleteRun(ctx context.Context, m IngestMeta, status string, ta
 	if _, err := tx.ExecContext(ctx, `UPDATE hosts SET last_run_status=? WHERE id=?`, status, hostID); err != nil {
 		return 0, err
 	}
-	if len(targets) > 0 {
-		ph := strings.TrimSuffix(strings.Repeat("?,", len(targets)), ",")
+	if targets != nil {
+		q := `UPDATE targets SET retired_at=? WHERE host_id=? AND retired_at IS NULL`
 		args := []any{now(), hostID}
-		for _, t := range targets {
-			args = append(args, t)
+		if len(targets) > 0 { // an empty list retires every target
+			q += ` AND name NOT IN (` + strings.TrimSuffix(strings.Repeat("?,", len(targets)), ",") + `)`
+			for _, t := range targets {
+				args = append(args, t)
+			}
 		}
-		res, err := tx.ExecContext(ctx, `UPDATE targets SET retired_at=? WHERE host_id=? AND retired_at IS NULL AND name NOT IN (`+ph+`)`, args...)
+		res, err := tx.ExecContext(ctx, q, args...)
 		if err != nil {
 			return 0, err
 		}

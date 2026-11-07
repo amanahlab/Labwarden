@@ -108,6 +108,14 @@ func TestIngestAndQuery(t *testing.T) {
 	if sum3.Targets != 1 {
 		t.Fatalf("targets after retire = %d", sum3.Targets)
 	}
+	// nil = no list sent: nothing is retired.
+	if retired, err := s.CompleteRun(ctx, IngestMeta{Host: "vm-1"}, "ok", nil); err != nil || retired != 0 {
+		t.Fatalf("nil target list retired %d (%v)", retired, err)
+	}
+	// An empty list = the host has no targets left.
+	if retired, err := s.CompleteRun(ctx, IngestMeta{Host: "vm-1"}, "ok", []string{}); err != nil || retired != 1 {
+		t.Fatalf("empty target list retired %d (%v), want 1", retired, err)
+	}
 
 	trends, err := s.Trends(ctx, 30)
 	if err != nil || len(trends) != 1 {

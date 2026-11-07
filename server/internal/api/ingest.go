@@ -209,7 +209,12 @@ func (s *Server) ingestRun(w http.ResponseWriter, r *http.Request) {
 		s.event(r, "info", "agent", m.Host, m.RunID, orDefault(msg, "scan run started"))
 		writeJSON(w, http.StatusAccepted, map[string]any{"ok": true})
 	case "ok", "error":
-		targets := make([]string, 0, len(in.Targets))
+		// nil = the agent sent no target list (retire nothing); an empty list
+		// means the run succeeded and found no targets (retire them all).
+		var targets []string
+		if in.Targets != nil {
+			targets = make([]string, 0, len(in.Targets))
+		}
 		for _, t := range in.Targets {
 			if t = clean(t, 512); t != "" {
 				targets = append(targets, t)

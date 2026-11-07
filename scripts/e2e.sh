@@ -1,0 +1,74 @@
+#!/usr/bin/env sh
+# End-to-end check: start the dashboard and the testbed, wait for both agents
+# to report, then assert known vulnerabilities, triage, central scanning and
+# retirement of a container that disappears. Never prints secrets.
+set -eu
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+[ -f .env ] || scripts/dev-env.sh
+set -a; . ./.env; set +a
+URL="http://localhost:${VULNX_PORT:-8080}"
+JAR=$(mktemp); trap 'rm -f "$JAR"' EXIT
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+pass() { echo "ok   $*"; }
+api() { curl -fsS -b "$JAR" -c "$JAR" "$@"; }
+jqr() { docker run --rm -i ghcr.io/jqlang/jq:1.8.1 "$@"; }
+wait_for() { # wait_for <seconds> <description> <command...>
+  _t=$1 _d=$2; shift 2
+  while ! "$@" >/dev/null 2>&1; do
+    _t=$((_t - 5)); [ "$_t" -gt 0 ] || fail "timed out waiting for $_d"
+    sleep 5
+  done
+  pass "$_d"
+}
+
+echo "== starting stack"
+docker compose --profile testbed up -d --build --quiet-pull >/dev/null
+wait_for 120 "dashboard healthy" curl -fsS "$URL/healthz"
+
+printf '{"password":"%s"}' "$VULNX_ADMIN_PASSWORD" | api -o /dev/null -H 'Content-Type: application/json' --data-binary @- "$URL/api/v1/auth/login" ||
+  fail "login"
+pass "admin login"
+
+host_id() { api "$URL/api/v1/hosts?q=$1" | jqr -e --arg n "$1" '.items[] | select(.name == $n and .total > 0) | .id'; }
+wait_for 900 "testbed-vm reported findings" host_id testbed-vm
+wait_for 900 "testbed-docker reported findings" host_id testbed-docker
+
+has_vuln() { # has_vuln <query> <jq filter on items>
+  api "$URL/api/v1/vulnerabilities?q=$1&status=all&size=100" | jqr -e "[.items[] | $2] | any" >/dev/null || fail "expected $1 ($2)"
+  pass "found $1"
+}
+has_vuln CVE-2021-44228 '.kev and .severity == "Critical"'
+has_vuln django '.packages == "django"'
+has_vuln lodash '.packages == "lodash"'
+has_vuln log4j-core '.packages == "log4j-core"'
+api "$URL/api/v1/findings?pkg_type=apk&size=1" | jqr -e '.total > 0' >/dev/null || fail "no apk findings from the docker agent"
+pass "docker image findings (apk)"
+
+echo "== triage"
+VID=$(api "$URL/api/v1/vulnerabilities?q=CVE-2021-44228" | jqr -r '.items[0].id')
+api -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"host_id":0,"status":"acknowledged","note":"e2e"}' "$URL/api/v1/vulnerabilities/$VID/triage"
+api "$URL/api/v1/vulnerabilities/$VID" | jqr -e '.vulnerability.status == "acknowledged"' >/dev/null || fail "triage not applied"
+api -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"host_id":0,"status":"open","note":""}' "$URL/api/v1/vulnerabilities/$VID/triage"
+pass "triage round trip on $VID"
+
+echo "== central registry scan"
+CID=$(api -H 'Content-Type: application/json' -d '{"ref":"alpine:3.12","host_name":"registry","group":"images","interval_min":1440}' "$URL/api/v1/central-targets" | jqr -r '.id')
+central_ok() { api "$URL/api/v1/central-targets" | jqr -e --argjson id "$CID" '.[] | select(.id == $id) | .last_status == "ok"'; }
+wait_for 600 "central scan of alpine:3.12" central_ok
+api -o /dev/null -X DELETE "$URL/api/v1/central-targets/$CID"
+
+echo "== retirement of a removed container"
+DID=$(host_id testbed-docker)
+docker compose --profile testbed stop testbed-workload >/dev/null
+docker compose --profile testbed exec -T testbed-docker-agent vulnx-agent >/dev/null 2>&1 || fail "manual agent run"
+api "$URL/api/v1/hosts/$DID" | jqr -e '[.targets[] | select(.name == "vulnx-testbed-workload:latest") | .retired_at != ""] | all' >/dev/null ||
+  fail "workload target not retired"
+pass "workload image retired after it stopped running"
+docker compose --profile testbed start testbed-workload >/dev/null
+
+echo "== logs"
+api "$URL/api/v1/events?source=agent&size=1" | jqr -e '.total > 0' >/dev/null || fail "no agent events"
+pass "agent events recorded"
+echo "e2e passed"
