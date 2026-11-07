@@ -1,0 +1,525 @@
+import { useState, type ReactNode } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  Alert,
+  Badge,
+  Box,
+  Button,
+  Clipboard,
+  CloseButton,
+  Code,
+  DataList,
+  Dialog,
+  Field,
+  Grid,
+  HStack,
+  IconButton,
+  Input,
+  Link as CLink,
+  Portal,
+  Stack,
+  Switch,
+  Table,
+  Tabs,
+  Text,
+} from "@chakra-ui/react"
+import { LuKeyRound, LuPlay, LuPlus, LuTrash2 } from "react-icons/lu"
+import { api, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
+import { ago, dateTime } from "@/lib/format"
+import { DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel } from "@/components/common"
+import { toaster } from "@/components/ui/toaster"
+import { Tooltip } from "@/components/ui/tooltip"
+
+const onError = (title: string) => (e: unknown) => toaster.create({ type: "error", title, description: (e as Error).message })
+
+export function SettingsPage() {
+  return (
+    <>
+      <PageHeader title="Settings" description="Connect hosts, manage ingest tokens and schedule central registry scans." />
+      <Stack gap="6">
+        <AgentSetup />
+        <Grid templateColumns={{ base: "1fr", xl: "3fr 2fr" }} gap="6" alignItems="start">
+          <Tokens />
+          <SystemPanel />
+        </Grid>
+        <CentralTargets />
+      </Stack>
+    </>
+  )
+}
+
+function CodeBlock({ code }: { code: string }) {
+  return (
+    <Box position="relative" bg={{ _light: "gray.900", _dark: "gray.900" }} color="gray.100" rounded="md" p="4" pe="12" overflowX="auto">
+      <Text as="pre" fontFamily="mono" textStyle="xs" whiteSpace="pre">
+        {code}
+      </Text>
+      <Clipboard.Root value={code} position="absolute" top="2" right="2">
+        <Clipboard.Trigger asChild>
+          <IconButton size="xs" variant="ghost" color="gray.300" _hover={{ bg: "gray.700" }} aria-label="Copy">
+            <Clipboard.Indicator />
+          </IconButton>
+        </Clipboard.Trigger>
+      </Clipboard.Root>
+    </Box>
+  )
+}
+
+function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <HStack align="start" gap="3">
+      <Badge variant="solid" rounded="full" size="sm" mt="0.5">
+        {n}
+      </Badge>
+      <Stack gap="2" flex="1" minW="0">
+        <Text fontWeight="medium" textStyle="sm">
+          {title}
+        </Text>
+        {children}
+      </Stack>
+    </HStack>
+  )
+}
+
+function AgentSetup() {
+  const url = window.location.origin
+  const vm = `curl -fsSL ${url}/install.sh | sudo VULNX_URL=${url} VULNX_TOKEN=<token> VULNX_GROUP=homelab sh`
+  const docker = `docker run -d --name vulnx-agent --restart unless-stopped \\
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \\
+  -v vulnx-agent-db:/var/lib/vulnx \\
+  -e VULNX_URL=${url} -e VULNX_TOKEN=<token> \\
+  -e VULNX_HOST=$(hostname) -e VULNX_GROUP=homelab \\
+  vulnx-agent:latest`
+  const compose = `services:
+  vulnx-agent:
+    image: vulnx-agent:latest   # built from agent/Dockerfile in the VulnX repo
+    restart: unless-stopped
+    hostname: \${HOSTNAME}
+    environment:
+      VULNX_URL: ${url}
+      VULNX_TOKEN: <token>
+      VULNX_GROUP: homelab
+      VULNX_INTERVAL: "21600"    # seconds between scans
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - vulnx-agent-db:/var/lib/vulnx
+volumes:
+  vulnx-agent-db: {}`
+  return (
+    <Panel title="Connect a host" subtitle="The agent runs Grype locally and pushes compressed JSON reports, run status and logs to this dashboard.">
+      <Tabs.Root defaultValue="vm" variant="enclosed" size="sm">
+        <Tabs.List>
+          <Tabs.Trigger value="vm">Linux VM</Tabs.Trigger>
+          <Tabs.Trigger value="docker">Docker host</Tabs.Trigger>
+          <Tabs.Trigger value="compose">Docker Compose</Tabs.Trigger>
+          <Tabs.Trigger value="how">How it works</Tabs.Trigger>
+        </Tabs.List>
+        <Tabs.Content value="vm">
+          <Stack gap="4">
+            <Step n={1} title="Create an ingest token below and replace <token>">
+              <Text textStyle="sm" color="fg.muted">
+                Use one token per host, so you can revoke a single machine.
+              </Text>
+            </Step>
+            <Step n={2} title="Run the installer as root">
+              <CodeBlock code={vm} />
+              <Text textStyle="xs" color="fg.muted">
+                It installs Grype, the agent script and a systemd timer (every 6 hours, randomized by 15 minutes, catches up after downtime). Without
+                systemd it uses cron. The first scan starts right away. Options: <Code size="sm">VULNX_SCAN_PATHS</Code>,{" "}
+                <Code size="sm">VULNX_SCHEDULE</Code>, <Code size="sm">VULNX_SCAN_DOCKER</Code>. Uninstall with{" "}
+                <Code size="sm">… | sudo sh -s -- --uninstall</Code>.
+              </Text>
+            </Step>
+            <Step n={3} title="Check progress">
+              <CodeBlock code={"journalctl -u vulnx-agent -f      # systemd\ntail -f /var/log/vulnx-agent.log  # cron"} />
+            </Step>
+          </Stack>
+        </Tabs.Content>
+        <Tabs.Content value="docker">
+          <Stack gap="3">
+            <Text textStyle="sm" color="fg.muted">
+              Scans the image of every running container through the Docker socket (read-only). Build the image once from the repository with{" "}
+              <Code size="sm">docker build -t vulnx-agent agent/</Code>.
+            </Text>
+            <CodeBlock code={docker} />
+            <Text textStyle="xs" color="fg.muted">
+              Images that disappear from the host are retired from the dashboard after the next successful run.
+            </Text>
+          </Stack>
+        </Tabs.Content>
+        <Tabs.Content value="compose">
+          <CodeBlock code={compose} />
+        </Tabs.Content>
+        <Tabs.Content value="how">
+          <Stack gap="2" textStyle="sm" color="fg.muted" maxW="3xl">
+            <Text>
+              <b>Schedule.</b> VMs use a systemd timer (cron fallback). The Docker agent loops with a sleep of <Code size="sm">VULNX_INTERVAL</Code>. Each run
+              reports its interval, so hosts that stay silent for more than 2.5 intervals are flagged as <i>stale</i>.
+            </Text>
+            <Text>
+              <b>Reports.</b> Grype JSON is gzipped and POSTed to <Code size="sm">/api/v1/ingest/report</Code> with a bearer token. If the dashboard is
+              unreachable, the report is kept in a local spool and re-sent on the next run.
+            </Text>
+            <Text>
+              <b>Logs.</b> The run start and end go to <Code size="sm">/api/v1/ingest/run</Code>. Warnings and errors (Grype failures, DB update problems,
+              upload failures) go to <Code size="sm">/api/v1/ingest/event</Code> and appear under Logs. A run that ends in error marks the host as{" "}
+              <i>failing</i>.
+            </Text>
+            <Text>
+              <b>Central scanning.</b> Registry images listed below are scanned by the dashboard itself, which also keeps its own Grype DB up to date.
+            </Text>
+          </Stack>
+        </Tabs.Content>
+      </Tabs.Root>
+    </Panel>
+  )
+}
+
+function Tokens() {
+  const qc = useQueryClient()
+  const [name, setName] = useState("")
+  const [created, setCreated] = useState<{ name: string; value: string } | null>(null)
+  const tokens = useQuery({ queryKey: ["tokens"], queryFn: () => api.get<Token[]>("/tokens") })
+  const create = useMutation({
+    mutationFn: () => api.post<{ token: Token; value: string }>("/tokens", { name: name.trim() }),
+    onSuccess: (r) => {
+      setCreated({ name: r.token.name, value: r.value })
+      setName("")
+      qc.invalidateQueries({ queryKey: ["tokens"] })
+    },
+    onError: onError("Could not create token"),
+  })
+  const revoke = useMutation({
+    mutationFn: (id: number) => api.del(`/tokens/${id}`),
+    onSuccess: () => {
+      toaster.create({ type: "success", title: "Token revoked" })
+      qc.invalidateQueries({ queryKey: ["tokens"] })
+    },
+    onError: onError("Could not revoke token"),
+  })
+
+  return (
+    <Panel title="Ingest tokens" subtitle="Agents authenticate with a bearer token. Only a SHA-256 hash is stored.">
+      <Stack gap="4">
+        <HStack
+          as="form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            create.mutate()
+          }}
+        >
+          <Input size="sm" placeholder="Token name, e.g. nas-01" value={name} maxLength={64} onChange={(e) => setName(e.currentTarget.value)} />
+          <Button size="sm" type="submit" loading={create.isPending} disabled={!name.trim()}>
+            <LuPlus /> Create
+          </Button>
+        </HStack>
+        {tokens.error && <ErrorBox error={tokens.error} />}
+        {tokens.data && tokens.data.length === 0 ? (
+          <Empty icon={<LuKeyRound />} title="No tokens" description="Create one to connect your first agent." />
+        ) : (
+          <Table.Root size="sm">
+            <Table.Header>
+              <Table.Row>
+                <Header>Name</Header>
+                <Header>Token</Header>
+                <Header>Created</Header>
+                <Header>Last used</Header>
+                <Header />
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {tokens.data?.map((t) => (
+                <Table.Row key={t.id}>
+                  <Table.Cell fontWeight="medium">{t.name}</Table.Cell>
+                  <Table.Cell>
+                    <Mono color="fg.muted">{t.prefix}…</Mono>
+                  </Table.Cell>
+                  <Table.Cell color="fg.muted" title={dateTime(t.created_at)}>
+                    {ago(t.created_at)}
+                  </Table.Cell>
+                  <Table.Cell color="fg.muted" title={dateTime(t.last_used)}>
+                    {ago(t.last_used)}
+                  </Table.Cell>
+                  <Table.Cell textAlign="end">
+                    <ConfirmButton
+                      label={`Revoke ${t.name}?`}
+                      body="Agents using this token will be rejected on their next upload."
+                      action="Revoke"
+                      onConfirm={() => revoke.mutate(t.id)}
+                    />
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </Table.Root>
+        )}
+      </Stack>
+      <Dialog.Root open={!!created} onOpenChange={(e) => !e.open && setCreated(null)}>
+        <Portal>
+          <Dialog.Backdrop />
+          <Dialog.Positioner>
+            <Dialog.Content>
+              <Dialog.Header>
+                <Dialog.Title>Token “{created?.name}” created</Dialog.Title>
+              </Dialog.Header>
+              <Dialog.Body>
+                <Stack gap="3">
+                  <Alert.Root status="warning" size="sm">
+                    <Alert.Indicator />
+                    <Alert.Title>Copy it now. It will not be shown again.</Alert.Title>
+                  </Alert.Root>
+                  <Clipboard.Root value={created?.value ?? ""}>
+                    <HStack>
+                      <Input readOnly value={created?.value ?? ""} fontFamily="mono" size="sm" onFocus={(e) => e.currentTarget.select()} />
+                      <Clipboard.Trigger asChild>
+                        <Button size="sm" variant="outline">
+                          <Clipboard.Indicator />
+                          <Clipboard.CopyText />
+                        </Button>
+                      </Clipboard.Trigger>
+                    </HStack>
+                  </Clipboard.Root>
+                </Stack>
+              </Dialog.Body>
+              <Dialog.Footer>
+                <Button onClick={() => setCreated(null)}>Done</Button>
+              </Dialog.Footer>
+              <Dialog.CloseTrigger asChild>
+                <CloseButton size="sm" />
+              </Dialog.CloseTrigger>
+            </Dialog.Content>
+          </Dialog.Positioner>
+        </Portal>
+      </Dialog.Root>
+    </Panel>
+  )
+}
+
+function ConfirmButton({ label, body, action, onConfirm }: { label: string; body: string; action: string; onConfirm: () => void }) {
+  return (
+    <Dialog.Root role="alertdialog" size="sm">
+      <Dialog.Trigger asChild>
+        <IconButton size="xs" variant="ghost" colorPalette="red" aria-label={action}>
+          <LuTrash2 />
+        </IconButton>
+      </Dialog.Trigger>
+      <Portal>
+        <Dialog.Backdrop />
+        <Dialog.Positioner>
+          <Dialog.Content>
+            <Dialog.Header>
+              <Dialog.Title>{label}</Dialog.Title>
+            </Dialog.Header>
+            <Dialog.Body>
+              <Text textStyle="sm">{body}</Text>
+            </Dialog.Body>
+            <Dialog.Footer>
+              <Dialog.ActionTrigger asChild>
+                <Button variant="outline" size="sm">
+                  Cancel
+                </Button>
+              </Dialog.ActionTrigger>
+              <Dialog.ActionTrigger asChild>
+                <Button colorPalette="red" size="sm" onClick={onConfirm}>
+                  {action}
+                </Button>
+              </Dialog.ActionTrigger>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
+  )
+}
+
+function SystemPanel() {
+  const q = useQuery({ queryKey: ["system"], queryFn: () => api.get<SystemInfo>("/system"), refetchInterval: 15_000 })
+  const s = q.data
+  return (
+    <Panel title="System">
+      {q.error && <ErrorBox error={q.error} />}
+      {s && (
+        <DataList.Root orientation="horizontal" size="sm">
+          <DataList.Item>
+            <DataList.ItemLabel>VulnX</DataList.ItemLabel>
+            <DataList.ItemValue>{s.version}</DataList.ItemValue>
+          </DataList.Item>
+          <DataList.Item>
+            <DataList.ItemLabel>Authentication</DataList.ItemLabel>
+            <DataList.ItemValue>
+              {s.auth_enabled ? (
+                <Badge colorPalette="green" variant="subtle" size="sm">
+                  Password required
+                </Badge>
+              ) : (
+                <Badge colorPalette="red" variant="subtle" size="sm">
+                  Disabled: set VULNX_ADMIN_PASSWORD
+                </Badge>
+              )}
+            </DataList.ItemValue>
+          </DataList.Item>
+          <DataList.Item>
+            <DataList.ItemLabel>Central scanner</DataList.ItemLabel>
+            <DataList.ItemValue>
+              {s.scanner.available ? `grype ${s.scanner.grype_version}` : <Badge colorPalette="red">grype not found</Badge>}
+            </DataList.ItemValue>
+          </DataList.Item>
+          <DataList.Item>
+            <DataList.ItemLabel>Vulnerability DB</DataList.ItemLabel>
+            <DataList.ItemValue>
+              <Stack gap="0">
+                <Text>{s.scanner.db_built ? `built ${ago(s.scanner.db_built)}` : "not downloaded yet"}</Text>
+                {s.scanner.db_checked && (
+                  <Text textStyle="xs" color="fg.muted">
+                    schema {s.scanner.db_schema} · checked {ago(s.scanner.db_checked)}
+                  </Text>
+                )}
+                {s.scanner.db_error && (
+                  <Text textStyle="xs" color="fg.error">
+                    {s.scanner.db_error}
+                  </Text>
+                )}
+              </Stack>
+            </DataList.ItemValue>
+          </DataList.Item>
+          <DataList.Item>
+            <DataList.ItemLabel>Queue</DataList.ItemLabel>
+            <DataList.ItemValue>{s.scanner.running ? `scanning ${s.scanner.running}, ${s.scanner.queued} queued` : s.scanner.queued ? `${s.scanner.queued} queued` : "idle"}</DataList.ItemValue>
+          </DataList.Item>
+          <DataList.Item>
+            <DataList.ItemLabel>Max report size</DataList.ItemLabel>
+            <DataList.ItemValue>{s.max_report_mb} MB</DataList.ItemValue>
+          </DataList.Item>
+        </DataList.Root>
+      )}
+    </Panel>
+  )
+}
+
+function CentralTargets() {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({ ref: "", host_name: "registry", group: "images", interval_min: 1440 })
+  const list = useQuery({ queryKey: ["central"], queryFn: () => api.get<CentralTarget[]>("/central-targets"), refetchInterval: 15_000 })
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["central"] })
+  const add = useMutation({
+    mutationFn: () => api.post("/central-targets", { ...form, ref: form.ref.trim(), interval_min: Number(form.interval_min) }),
+    onSuccess: () => {
+      toaster.create({ type: "success", title: "Image added; first scan queued" })
+      setForm((f) => ({ ...f, ref: "" }))
+      invalidate()
+    },
+    onError: onError("Could not add image"),
+  })
+  const toggle = useMutation({
+    mutationFn: (t: CentralTarget) => api.patch(`/central-targets/${t.id}`, { enabled: !t.enabled }),
+    onSuccess: invalidate,
+    onError: onError("Update failed"),
+  })
+  const scan = useMutation({
+    mutationFn: (id: number) => api.post(`/central-targets/${id}/scan`),
+    onSuccess: () => {
+      toaster.create({ type: "info", title: "Scan queued" })
+      invalidate()
+    },
+    onError: onError("Could not queue scan"),
+  })
+  const del = useMutation({ mutationFn: (id: number) => api.del(`/central-targets/${id}`), onSuccess: invalidate, onError: onError("Delete failed") })
+
+  return (
+    <Panel title="Central registry scans" subtitle="Images the dashboard pulls from a registry and scans on a schedule. No agent needed.">
+      <Stack gap="4">
+        <HStack
+          as="form"
+          gap="2"
+          align="end"
+          wrap="wrap"
+          onSubmit={(e) => {
+            e.preventDefault()
+            add.mutate()
+          }}
+        >
+          <Field.Root flex="2" minW="64">
+            <Field.Label textStyle="xs">Image reference</Field.Label>
+            <Input size="sm" placeholder="nginx:1.25 or ghcr.io/org/app:tag" value={form.ref} onChange={(e) => setForm({ ...form, ref: e.currentTarget.value })} />
+          </Field.Root>
+          <Field.Root flex="1" minW="32">
+            <Field.Label textStyle="xs">Shown under host</Field.Label>
+            <Input size="sm" value={form.host_name} onChange={(e) => setForm({ ...form, host_name: e.currentTarget.value })} />
+          </Field.Root>
+          <Field.Root flex="1" minW="28">
+            <Field.Label textStyle="xs">Group</Field.Label>
+            <Input size="sm" value={form.group} onChange={(e) => setForm({ ...form, group: e.currentTarget.value })} />
+          </Field.Root>
+          <Field.Root w="28">
+            <Field.Label textStyle="xs">Every (min)</Field.Label>
+            <Input size="sm" type="number" min={15} value={form.interval_min} onChange={(e) => setForm({ ...form, interval_min: Number(e.currentTarget.value) })} />
+          </Field.Root>
+          <Button size="sm" type="submit" loading={add.isPending} disabled={!form.ref.trim()}>
+            <LuPlus /> Add image
+          </Button>
+        </HStack>
+        {list.error && <ErrorBox error={list.error} />}
+        {list.data && list.data.length > 0 && (
+          <DataTable minW="4xl">
+            <Table.Header>
+              <Table.Row>
+                <Header>Image</Header>
+                <Header>Host / group</Header>
+                <Header>Interval</Header>
+                <Header>Last run</Header>
+                <Header>Enabled</Header>
+                <Header />
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {list.data.map((t) => (
+                <Table.Row key={t.id}>
+                  <Table.Cell>
+                    <Mono>{t.ref}</Mono>
+                  </Table.Cell>
+                  <Table.Cell color="fg.muted">
+                    {t.host_name} / {t.group}
+                  </Table.Cell>
+                  <Table.Cell color="fg.muted">{t.interval_min >= 60 && t.interval_min % 60 === 0 ? `${t.interval_min / 60}h` : `${t.interval_min}m`}</Table.Cell>
+                  <Table.Cell>
+                    <Stack gap="0">
+                      <Text textStyle="sm">{ago(t.last_run)}</Text>
+                      {t.last_status && (
+                        <Tooltip content={t.last_status} disabled={t.last_status === "ok"}>
+                          <Text textStyle="xs" color={t.last_status === "ok" ? "fg.success" : "fg.error"} truncate maxW="64">
+                            {t.last_status}
+                          </Text>
+                        </Tooltip>
+                      )}
+                    </Stack>
+                  </Table.Cell>
+                  <Table.Cell>
+                    <Switch.Root size="sm" checked={t.enabled} onCheckedChange={() => toggle.mutate(t)}>
+                      <Switch.HiddenInput />
+                      <Switch.Control />
+                    </Switch.Root>
+                  </Table.Cell>
+                  <Table.Cell textAlign="end" whiteSpace="nowrap">
+                    <Tooltip content="Scan now">
+                      <IconButton size="xs" variant="ghost" aria-label="Scan now" onClick={() => scan.mutate(t.id)}>
+                        <LuPlay />
+                      </IconButton>
+                    </Tooltip>
+                    <ConfirmButton label={`Remove ${t.ref}?`} body="Already reported findings stay until you remove the host." action="Remove" onConfirm={() => del.mutate(t.id)} />
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+            </Table.Body>
+          </DataTable>
+        )}
+        <Text textStyle="xs" color="fg.muted">
+          Private registries: mount Docker credentials into the dashboard container (see{" "}
+          <CLink href="https://github.com/anchore/grype#private-registry-authentication" target="_blank" rel="noopener noreferrer">
+            Grype registry auth
+          </CLink>
+          ).
+        </Text>
+      </Stack>
+    </Panel>
+  )
+}
