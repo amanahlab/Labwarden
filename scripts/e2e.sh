@@ -33,6 +33,8 @@ pass "admin login"
 
 host_id() { api "$URL/api/v1/hosts?q=$1" | jqr -e --arg n "$1" '.items[] | select(.name == $n and .total > 0) | .id'; }
 wait_for 900 "testbed-vm reported findings" host_id testbed-vm
+# Don't wait for the 15-minute loop: run the docker agent now (a no-op if a run is in progress).
+docker compose --profile testbed exec -T testbed-docker-agent vulnx-agent >/dev/null 2>&1 || true
 wait_for 900 "testbed-docker reported findings" host_id testbed-docker
 
 has_vuln() { # has_vuln <query> <jq filter on items>
@@ -61,12 +63,16 @@ api -o /dev/null -X DELETE "$URL/api/v1/central-targets/$CID"
 
 echo "== retirement of a removed container"
 DID=$(host_id testbed-docker)
+run_agent() { docker compose --profile testbed exec -T testbed-docker-agent vulnx-agent >/dev/null 2>&1; }
+workload_retired() { # workload_retired <true|false>: runs the agent once, then checks
+  run_agent || return 1
+  api "$URL/api/v1/hosts/$DID" | jqr -e --argjson want "$1" \
+    '[.targets[] | select(.name == "vulnx-testbed-workload:latest") | .retired_at != ""] | (length > 0 and all == $want)'
+}
 docker compose --profile testbed stop testbed-workload >/dev/null
-docker compose --profile testbed exec -T testbed-docker-agent vulnx-agent >/dev/null 2>&1 || fail "manual agent run"
-api "$URL/api/v1/hosts/$DID" | jqr -e '[.targets[] | select(.name == "vulnx-testbed-workload:latest") | .retired_at != ""] | all' >/dev/null ||
-  fail "workload target not retired"
-pass "workload image retired after it stopped running"
+wait_for 300 "workload image retired after it stopped running" workload_retired true
 docker compose --profile testbed start testbed-workload >/dev/null
+wait_for 300 "workload image back after it started again" workload_retired false
 
 echo "== logs"
 api "$URL/api/v1/events?source=agent&size=1" | jqr -e '.total > 0' >/dev/null || fail "no agent events"

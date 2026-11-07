@@ -99,22 +99,93 @@ docker_enabled() {
 	[ -S "$VULNX_DOCKER_SOCK" ]
 }
 
-# Unique image references used by running containers.
+docker_api() { # docker_api <path> [curl args]: Docker Engine API over the socket
+	_p=$1
+	shift
+	curl -fsS --unix-socket "$VULNX_DOCKER_SOCK" "$@" "http://localhost$_p"
+}
+
+# One line per distinct running image: "<image-id> <container-id> <name>". The
+# name is the image the container was started from, so it stays stable when a
+# tag moves.
 docker_images() {
-	if command -v docker >/dev/null 2>&1; then
-		if [ -n "$VULNX_DOCKER_LABEL" ]; then
-			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps --filter "label=$VULNX_DOCKER_LABEL" --format '{{.Image}}'
-		else
-			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps --format '{{.Image}}'
-		fi
-	elif command -v jq >/dev/null 2>&1; then
+	if command -v jq >/dev/null 2>&1; then
 		_filter=""
 		[ -n "$VULNX_DOCKER_LABEL" ] && _filter="?filters=$(urlenc "{\"label\":[$(json_str "$VULNX_DOCKER_LABEL")]}")"
-		curl -fsS --unix-socket "$VULNX_DOCKER_SOCK" "http://localhost/containers/json$_filter" | jq -r '.[].Image'
+		docker_api "/containers/json$_filter" | jq -r '.[].Id' | while read -r _c; do
+			docker_api "/containers/$_c/json" | jq -r '.Image + " " + .Id + " " + .Config.Image'
+		done
+	elif command -v docker >/dev/null 2>&1; then
+		if [ -n "$VULNX_DOCKER_LABEL" ]; then
+			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps -q --filter "label=$VULNX_DOCKER_LABEL"
+		else
+			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps -q
+		fi | while read -r _c; do
+			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker inspect --format '{{.Image}} {{.Id}} {{.Config.Image}}' "$_c" </dev/null
+		done
 	else
-		event error "docker scanning needs the docker CLI or jq"
+		event error "docker scanning needs jq or the docker CLI"
 		return 1
-	fi | sort -u
+	fi | sort -u -k1,1
+}
+
+image_id_of() { # image_id_of <name>: current image ID behind a tag
+	if command -v jq >/dev/null 2>&1; then
+		docker_api "/images/$1/json" 2>/dev/null | jq -r '.Id'
+	else
+		DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker image inspect --format '{{.Id}}' "$1" </dev/null 2>/dev/null
+	fi
+}
+
+save_image() { # save_image <image-id> <file>
+	if command -v jq >/dev/null 2>&1; then
+		docker_api "/images/$1/get" -o "$2"
+	else
+		DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker save -o "$2" "$1" </dev/null
+	fi
+}
+
+export_container() { # export_container <container-id> <dir>: unpack its filesystem
+	mkdir -p "$2"
+	if command -v jq >/dev/null 2>&1; then
+		docker_api "/containers/$1/export" | tar -xf - -C "$2" 2>/dev/null
+	else
+		DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker export "$1" </dev/null | tar -xf - -C "$2" 2>/dev/null
+	fi
+	[ -d "$2/etc" ] || [ -d "$2/usr" ]
+}
+
+# scan_image <image-id> <container-id> <name>. In order of preference:
+#  1. by tag, when it still points at the running image;
+#  2. an export of the image, when the tag moved but the image still exists;
+#  3. the container's filesystem, when the image itself is gone (rebuilt and
+#     removed while the container kept running).
+scan_image() {
+	if [ "$(image_id_of "$3")" = "$1" ]; then
+		scan "docker:$3" "$3"
+		return
+	fi
+	if save_image "$1" "$WORK/image.tar" 2>/dev/null; then
+		log info "$3 no longer points at the running image; scanning an export of ${1#sha256:}"
+		scan "docker-archive:$WORK/image.tar" "$3"
+		_rc=$?
+		rm -f "$WORK/image.tar"
+		return $_rc
+	fi
+	rm -f "$WORK/image.tar"
+	log info "image of $3 was removed while its container runs; scanning the container filesystem"
+	if ! export_container "$2" "$WORK/rootfs"; then
+		event error "could not export container ${2%"${2#????????????}"} ($3)"
+		rm -rf "$WORK/rootfs"
+		return 1
+	fi
+	_ex=$VULNX_EXCLUDES
+	VULNX_EXCLUDES=""
+	scan "dir:$WORK/rootfs" "$3"
+	_rc=$?
+	VULNX_EXCLUDES=$_ex
+	rm -rf "$WORK/rootfs"
+	return $_rc
 }
 
 query_for() { # query_for <target-name> <duration-ms>
@@ -159,7 +230,7 @@ scan() {
 	_excl=""
 	case "$_src" in dir:*) for e in $VULNX_EXCLUDES; do _excl="$_excl --exclude $e"; done ;; esac
 	# shellcheck disable=SC2086
-	if ! "$GRYPE" "$_src" -o json -q $_excl >"$WORK/report.json" 2>"$WORK/grype.err"; then
+	if ! "$GRYPE" "$_src" -o json $_excl >"$WORK/report.json" 2>"$WORK/grype.err"; then
 		set +f
 		event error "grype failed on $_name: $(tail -c 800 "$WORK/grype.err")"
 		return 1
@@ -216,10 +287,11 @@ main() {
 
 	if docker_enabled; then
 		if docker_images >"$WORK/images.txt"; then
-			while read -r img; do
-				[ -n "$img" ] || continue
-				add_target "$img"
-				if scan "docker:$img" "$img"; then scanned=$((scanned + 1)); else failed=$((failed + 1)); fi
+			while read -r id cid name; do
+				[ -n "$id" ] || continue
+				case "$name" in "" | sha256:*) name=$(printf '%.12s' "${id#sha256:}") ;; esac
+				add_target "$name"
+				if scan_image "$id" "$cid" "$name"; then scanned=$((scanned + 1)); else failed=$((failed + 1)); fi
 			done <"$WORK/images.txt"
 		else
 			event error "could not list containers via $VULNX_DOCKER_SOCK"

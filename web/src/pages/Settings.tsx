@@ -94,10 +94,10 @@ function AgentSetup() {
   vulnx-agent:
     image: vulnx-agent:latest   # built from agent/Dockerfile in the VulnX repo
     restart: unless-stopped
-    hostname: \${HOSTNAME}
     environment:
       VULNX_URL: ${url}
       VULNX_TOKEN: <token>
+      VULNX_HOST: <host-name>      # name shown in the dashboard
       VULNX_GROUP: homelab
       VULNX_INTERVAL: "21600"    # seconds between scans
     volumes:

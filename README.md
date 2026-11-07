@@ -50,7 +50,7 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
 | Where | Mechanism |
 |---|---|
 | **VMs** | `install.sh` installs Grype, the agent and a **systemd timer** (`OnCalendar` every 6h, `RandomizedDelaySec=15m`, `Persistent=true` so missed runs catch up). Without systemd (Alpine, containers) it writes `/etc/cron.d/vulnx-agent` at a random minute. A lock prevents overlapping runs. |
-| **Docker hosts** | The `vulnx-agent` container runs the agent, then sleeps `VULNX_INTERVAL` seconds, in a loop. It lists running containers through the read-only Docker socket and scans each distinct image. `VULNX_DOCKER_LABEL` limits scanning to labelled containers. |
+| **Docker hosts** | The `vulnx-agent` container runs the agent, then sleeps `VULNX_INTERVAL` seconds, in a loop. It lists running containers through the read-only Docker socket and scans each distinct image. If a tag was moved by a rebuild, it scans the image actually running. If that image was already deleted, it scans the container filesystem. `VULNX_DOCKER_LABEL` limits scanning to labelled containers. |
 | **Registry images** | Added in Settings. The server's scheduler scans `registry:<ref>` every N minutes, with no agent involved. |
 | **Grype DB** | Each agent runs `grype db update` before scanning. The server updates its own DB every 6 hours. |
 
