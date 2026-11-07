@@ -69,9 +69,9 @@ func (s *Server) exportVulns(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		for _, f := range page.Items {
-			_ = cw.Write([]string{f.HostName, f.Group, f.TargetName, f.VulnID, f.Severity, fmt.Sprintf("%.1f", f.CVSS),
+			_ = cw.Write(csvRow(f.HostName, f.Group, f.TargetName, f.VulnID, f.Severity, fmt.Sprintf("%.1f", f.CVSS),
 				fmt.Sprintf("%.4f", f.EPSS), strconv.FormatBool(f.KEV), f.PkgName, f.PkgVersion, f.PkgType, f.FixState,
-				f.FixVersions, f.Status, f.FirstSeen})
+				f.FixVersions, f.Status, f.FirstSeen))
 		}
 		if p.Page*p.Size >= page.Total {
 			break
@@ -79,6 +79,17 @@ func (s *Server) exportVulns(w http.ResponseWriter, r *http.Request) {
 		p.Page++
 	}
 	cw.Flush()
+}
+
+// csvRow neutralizes spreadsheet formulas: host and package names come from
+// agents, so a cell like "=HYPERLINK(...)" must not execute when opened.
+func csvRow(cells ...string) []string {
+	for i, c := range cells {
+		if c != "" && strings.ContainsRune("=+-@\t\r", rune(c[0])) {
+			cells[i] = "'" + c
+		}
+	}
+	return cells
 }
 
 func (s *Server) getVuln(w http.ResponseWriter, r *http.Request) {

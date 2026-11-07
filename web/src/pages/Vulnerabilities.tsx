@@ -29,7 +29,7 @@ const DEFAULTS = { view: "vulns", sort: "severity", order: "desc", status: "acti
 const FILTER_KEYS = ["q", "severity", "fix", "kev", "group", "pkg_type", "status", "host_id"]
 
 export const STATUS_OPTIONS: [string, string][] = [
-  ["active", "Active (open + acknowledged)"],
+  ["active", "Open + acknowledged"],
   ["open", "Open"],
   ["acknowledged", "Acknowledged"],
   ["ignored", "Ignored"],

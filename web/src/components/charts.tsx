@@ -46,7 +46,7 @@ export function SeverityTrend({ data }: { data: DailyStat[] }) {
           labelFormatter={(d) => shortDate(String(d))}
           content={<Chart.Tooltip />}
         />
-        <Legend content={<Chart.Legend />} verticalAlign="top" align="right" />
+        <Legend content={<Chart.Legend />} verticalAlign="top" align="right" itemSorter={(item) => TREND_SERIES.findIndex((s) => s.name === item.dataKey)} />
         {chart.series.map((s) => (
           <Area
             key={s.name}
@@ -126,7 +126,7 @@ export function SeverityDonut({ counts, caption }: { counts: Counts; caption: st
 }
 
 // Ranked horizontal bars (single series: one hue, value labels, no legend).
-export function RankedBars({ data, color = "series.1", hrefFor }: { data: NameCount[]; color?: string; hrefFor?: (name: string) => string }) {
+export function RankedBars({ data, color = "blue.muted", hrefFor }: { data: NameCount[]; color?: string; hrefFor?: (name: string) => string }) {
   const chart = useChart<BarListData>({
     sort: { by: "value", direction: "desc" },
     data: data.map((d) => ({ name: d.name || "(none)", value: d.count, href: hrefFor?.(d.name) })),

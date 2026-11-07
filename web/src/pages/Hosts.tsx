@@ -195,7 +195,7 @@ function GroupedHosts({ ps, hosts, by }: { ps: PS; hosts?: HostRow[]; by: "group
     return [...m.entries()].sort((a, b) => b[1].counts.critical * 100 + b[1].counts.high - (a[1].counts.critical * 100 + a[1].counts.high) || a[0].localeCompare(b[0]))
   }, [hosts, by])
 
-  if (!hosts) return <LoadingRows cols={1} />
+  if (!hosts) return <HostTable ps={ps} loading compact={by === "group"} />
   if (sections.length === 0) return <Empty icon={<LuServer />} title="No hosts match" />
   return (
     <Stack gap="4">

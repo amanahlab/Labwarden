@@ -13,6 +13,7 @@
 #   VULNX_SCAN_PATHS   space-separated directories to scan (default: /; empty disables)
 #   VULNX_SCAN_DOCKER  auto | true | false (default: auto = if a Docker socket is reachable)
 #   VULNX_DOCKER_SOCK  Docker socket path (default: /var/run/docker.sock)
+#   VULNX_DOCKER_LABEL only scan containers with this label, e.g. vulnx.scan=true
 #   VULNX_EXCLUDES     space-separated grype --exclude globs for directory scans
 #   VULNX_INTERVAL     seconds between runs, reported so the dashboard can flag silent hosts
 #   VULNX_SPOOL        directory for reports that failed to upload (default: /var/lib/vulnx/spool)
@@ -31,6 +32,7 @@ VULNX_GROUP=${VULNX_GROUP:-default}
 VULNX_SCAN_PATHS=${VULNX_SCAN_PATHS-/}
 VULNX_SCAN_DOCKER=${VULNX_SCAN_DOCKER:-auto}
 VULNX_DOCKER_SOCK=${VULNX_DOCKER_SOCK:-/var/run/docker.sock}
+VULNX_DOCKER_LABEL=${VULNX_DOCKER_LABEL:-}
 VULNX_EXCLUDES=${VULNX_EXCLUDES-./proc/** ./sys/** ./dev/** ./run/** ./tmp/** ./var/lib/docker/** ./var/lib/containerd/** ./var/lib/vulnx/** ./snap/** ./mnt/** ./media/**}
 VULNX_INTERVAL=${VULNX_INTERVAL:-21600}
 VULNX_SPOOL=${VULNX_SPOOL:-/var/lib/vulnx/spool}
@@ -100,9 +102,15 @@ docker_enabled() {
 # Unique image references used by running containers.
 docker_images() {
 	if command -v docker >/dev/null 2>&1; then
-		DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps --format '{{.Image}}'
+		if [ -n "$VULNX_DOCKER_LABEL" ]; then
+			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps --filter "label=$VULNX_DOCKER_LABEL" --format '{{.Image}}'
+		else
+			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps --format '{{.Image}}'
+		fi
 	elif command -v jq >/dev/null 2>&1; then
-		curl -fsS --unix-socket "$VULNX_DOCKER_SOCK" http://localhost/containers/json | jq -r '.[].Image'
+		_filter=""
+		[ -n "$VULNX_DOCKER_LABEL" ] && _filter="?filters=$(urlenc "{\"label\":[$(json_str "$VULNX_DOCKER_LABEL")]}")"
+		curl -fsS --unix-socket "$VULNX_DOCKER_SOCK" "http://localhost/containers/json$_filter" | jq -r '.[].Image'
 	else
 		event error "docker scanning needs the docker CLI or jq"
 		return 1

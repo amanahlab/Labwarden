@@ -1,0 +1,237 @@
+package api
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/csv"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/cookiejar"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"testing/fstest"
+
+	"github.com/coronas2k/vulnx/server/internal/scanner"
+	"github.com/coronas2k/vulnx/server/internal/store"
+)
+
+const (
+	testPassword = "correct horse battery staple"
+	testToken    = "vx_test_token_0123456789abcdef"
+)
+
+func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "vulnx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	if _, err := st.ImportToken(context.Background(), "test", testToken); err != nil {
+		t.Fatal(err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	agentFS := fstest.MapFS{"install.sh": {Data: []byte("#!/bin/sh\n")}, "vulnx-agent.sh": {Data: []byte("#!/bin/sh\n")}}
+	webFS := fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>VulnX</title>")}}
+	srv := New(Config{Version: "test", AdminPassword: testPassword, SessionKey: bytes.Repeat([]byte("k"), 32)},
+		st, scanner.New("grype-not-installed", st, log), log, webFS, agentFS)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts, st
+}
+
+func fixture(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile("../grype/testdata/app-dir.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func gz(t *testing.T, b []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(b); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func upload(t *testing.T, ts *httptest.Server, token, host string, body []byte, gzipped bool) *http.Response {
+	return uploadTo(t, ts, token, host, "/srv", body, gzipped)
+}
+
+func uploadTo(t *testing.T, ts *httptest.Server, token, host, target string, body []byte, gzipped bool) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/ingest/report?host="+host+"&kind=vm&group=lab&run_id=r1&target="+url.QueryEscape(target), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if gzipped {
+		req.Header.Set("Content-Encoding", "gzip")
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { resp.Body.Close() })
+	return resp
+}
+
+func login(t *testing.T, ts *httptest.Server, password string) *http.Client {
+	t.Helper()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	b, _ := json.Marshal(map[string]string{"password": password})
+	resp, err := c.Post(ts.URL+"/api/v1/auth/login", "application/json", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if password == testPassword && resp.StatusCode != http.StatusOK {
+		t.Fatalf("login: status %d", resp.StatusCode)
+	}
+	return c
+}
+
+func getJSON(t *testing.T, c *http.Client, url string, out any) int {
+	t.Helper()
+	resp, err := c.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if out != nil && resp.StatusCode == http.StatusOK {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return resp.StatusCode
+}
+
+func TestIngestRequiresValidToken(t *testing.T) {
+	ts, _ := newTestServer(t)
+	body := fixture(t)
+	for name, tok := range map[string]string{"missing": "", "wrong": "vx_wrong_token_0000000000000"} {
+		if got := upload(t, ts, tok, "h1", body, false).StatusCode; got != http.StatusUnauthorized {
+			t.Errorf("%s token: status %d, want 401", name, got)
+		}
+	}
+}
+
+func TestIngestPlainAndGzip(t *testing.T) {
+	ts, _ := newTestServer(t)
+	body := fixture(t)
+	if got := upload(t, ts, testToken, "plain-host", body, false).StatusCode; got != http.StatusCreated {
+		t.Fatalf("plain upload: status %d", got)
+	}
+	if got := upload(t, ts, testToken, "gzip-host", gz(t, body), true).StatusCode; got != http.StatusCreated {
+		t.Fatalf("gzip upload: status %d", got)
+	}
+	if got := upload(t, ts, testToken, "bad-host", []byte("not json"), false).StatusCode; got != http.StatusBadRequest {
+		t.Fatalf("garbage upload: status %d, want 400", got)
+	}
+
+	c := login(t, ts, testPassword)
+	var hosts struct {
+		Total int `json:"total"`
+	}
+	if code := getJSON(t, c, ts.URL+"/api/v1/hosts", &hosts); code != http.StatusOK || hosts.Total != 2 {
+		t.Fatalf("hosts: status %d total %d, want 200 and 2", code, hosts.Total)
+	}
+	var vulns struct {
+		Total int `json:"total"`
+	}
+	getJSON(t, c, ts.URL+"/api/v1/vulnerabilities", &vulns)
+	if vulns.Total == 0 {
+		t.Fatal("expected vulnerabilities after ingest")
+	}
+}
+
+func TestUIRequiresSession(t *testing.T) {
+	ts, _ := newTestServer(t)
+	if code := getJSON(t, http.DefaultClient, ts.URL+"/api/v1/summary", nil); code != http.StatusUnauthorized {
+		t.Fatalf("anonymous summary: status %d, want 401", code)
+	}
+	bad := login(t, ts, "wrong password")
+	if code := getJSON(t, bad, ts.URL+"/api/v1/summary", nil); code != http.StatusUnauthorized {
+		t.Fatalf("bad login summary: status %d, want 401", code)
+	}
+	// An ingest token is not a UI credential.
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/summary", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("token on UI endpoint: status %d, want 401", resp.StatusCode)
+	}
+	good := login(t, ts, testPassword)
+	if code := getJSON(t, good, ts.URL+"/api/v1/summary", nil); code != http.StatusOK {
+		t.Fatalf("summary after login: status %d", code)
+	}
+}
+
+func TestPublicEndpoints(t *testing.T) {
+	ts, _ := newTestServer(t)
+	for _, p := range []string{"/healthz", "/install.sh", "/agent/vulnx-agent.sh", "/", "/hosts/42"} {
+		if code := getJSON(t, http.DefaultClient, ts.URL+p, nil); code != http.StatusOK {
+			t.Errorf("GET %s: status %d", p, code)
+		}
+	}
+}
+
+func TestExportNeutralizesFormulas(t *testing.T) {
+	ts, _ := newTestServer(t)
+	if got := uploadTo(t, ts, testToken, "h1", "=HYPERLINK(1)", fixture(t), false).StatusCode; got != http.StatusCreated {
+		t.Fatalf("upload: status %d", got)
+	}
+	c := login(t, ts, testPassword)
+	resp, err := c.Get(ts.URL + "/api/v1/vulnerabilities/export.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	rows, err := csv.NewReader(resp.Body).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) < 2 {
+		t.Fatalf("export has %d rows", len(rows))
+	}
+	for _, row := range rows[1:] {
+		for _, cell := range row {
+			if strings.HasPrefix(cell, "=") {
+				t.Fatalf("formula cell not neutralized: %q", cell)
+			}
+		}
+		if row[2] != "'=HYPERLINK(1)" {
+			t.Fatalf("target cell = %q", row[2])
+		}
+	}
+}
+
+func TestCSVRow(t *testing.T) {
+	got := csvRow("=1+1", "+x", "-y", "@z", "plain", "")
+	want := []string{"'=1+1", "'+x", "'-y", "'@z", "plain", ""}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("cell %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
