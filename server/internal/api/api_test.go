@@ -176,6 +176,13 @@ func TestIngestRequiresAgentCredential(t *testing.T) {
 	if code, _ := postSBOM(t, ts, cred, "", "/gz", "r1", sbom, true); code != http.StatusAccepted {
 		t.Errorf("gzip upload without a host name: status %d, want 202", code)
 	}
+}
+
+func TestFindingsByHostAndLocation(t *testing.T) {
+	ts, st := newTestServer(t)
+	ingestFixture(t, st, "plain-host", "/")
+	ingestFixture(t, st, "gzip-host", "/")
+	c := login(t, ts, testPassword)
 	var byHost struct {
 		Total int `json:"total"`
 	}
