@@ -10,6 +10,9 @@ echo "== web lint / build"
 [ -d web/node_modules ] || scripts/npm.sh ci --no-audit --no-fund
 scripts/npm.sh run lint
 scripts/npm.sh run build
+echo "== known vulnerabilities in dependencies"
+scripts/go.sh run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... # pinned; bump deliberately
+scripts/npm.sh audit --omit=dev --audit-level=high
 echo "== shell"
 docker run --rm -v "$ROOT:/mnt:ro" -w /mnt koalaman/shellcheck:stable -s sh -S warning \
   agent/labwarden-agent.sh agent/install.sh agent/docker/entrypoint.sh testbed/vm/entrypoint.sh scripts/*.sh
