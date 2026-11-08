@@ -8,6 +8,7 @@ A homelab vulnerability dashboard. Agents on your VMs and Docker hosts run [Gryp
 - **Hosts**: health (healthy, stale, failing), grouped by group or kind, plus per-host findings, targets, scan history and logs.
 - **Scans and Logs**: every report received, and every agent run, warning and error. Logs have a live tail.
 - **Settings**: ingest tokens, agent install snippets, central registry scans and system status.
+- **Alerts**: a webhook (Slack, Discord, Mattermost, Gotify, ntfy or anything that takes JSON) when a scan finds new critical or known-exploited vulnerabilities.
 
 ## Quick start
 
@@ -102,6 +103,15 @@ Agent options (environment variables, or `/etc/vulnx/agent.env` on VMs):
 | `VULNX_MAX_REPORT_MB` | `256` | Maximum decompressed report size |
 | `VULNX_EVENT_RETENTION` | `50000` | Number of log events kept |
 | `VULNX_SCHEDULER` | `true` | Central registry scans and DB updates |
+| `VULNX_NOTIFY_URL` | *(empty: off)* | Webhook for alerts. Never logged or shown in the UI. |
+| `VULNX_NOTIFY_FORMAT` | `json` | `json` posts `{title, text, content, message, host, target, link, findings}`. `ntfy` posts plain text with ntfy headers. |
+| `VULNX_NOTIFY_MIN_SEVERITY` | `Critical` | `Critical`, `High`, `Medium` or `Low` |
+| `VULNX_NOTIFY_KEV` | `true` | Also alert on known-exploited (CISA KEV) findings below that severity |
+| `VULNX_PUBLIC_URL` | | Dashboard URL used for links in alerts |
+
+### Alerts
+
+After each stored report, VulnX compares the findings with the target's previous scan. It sends one message per report that lists the new findings at or above `VULNX_NOTIFY_MIN_SEVERITY`, plus any new known-exploited ones. Each vulnerability appears once, KEV first, and the message shows at most 10. A target's first scan counts every finding as new. Vulnerabilities triaged as *ignored* or *false positive*, globally or for that host, do not alert. **Settings → System → Send test** checks the setup. A failed delivery shows up under **Logs**.
 
 ## Development
 

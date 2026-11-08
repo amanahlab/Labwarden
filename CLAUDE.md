@@ -22,6 +22,7 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 | SQLite store, schema, queries | `server/internal/store` |
 | HTTP API (`/api/v1`), auth, ingest | `server/internal/api` |
 | Central scanner (runs the grype binary) | `server/internal/scanner` |
+| Webhook alerts for new findings | `server/internal/notify` |
 | React UI (Vite, Chakra UI v3, TanStack Query), embedded into the binary | `web/` |
 | Agent script, installer, Docker agent image | `agent/` |
 | Proving ground (vulnerable "VM" + docker agent) | `testbed/` |

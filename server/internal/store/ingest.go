@@ -36,7 +36,22 @@ type IngestResult struct {
 	Findings int    `json:"findings"`
 	New      int    `json:"new"`
 	Fixed    int    `json:"fixed"`
+	// NewFindings lists findings absent from the previous scan of the target
+	// (every finding on a first scan). Used for notifications.
+	NewFindings []NewFinding `json:"-"`
 }
+
+type NewFinding struct {
+	VulnID     string `json:"id"`
+	Severity   string `json:"severity"`
+	KEV        bool   `json:"kev"`
+	PkgName    string `json:"package"`
+	PkgVersion string `json:"version"`
+	FixVersion string `json:"fix,omitempty"`
+}
+
+// OnIngest registers fn to run after each stored report. Set it before serving.
+func (s *Store) OnIngest(fn func(IngestMeta, *IngestResult)) { s.onIngest = fn }
 
 var ErrInvalid = errors.New("invalid input")
 
@@ -100,6 +115,7 @@ func (s *Store) IngestReport(ctx context.Context, m IngestMeta, rep *grype.Repor
 	counts := map[string]int{}
 	fixable, newCount := 0, 0
 	current := map[string]bool{}
+	var fresh []NewFinding
 	for _, f := range findings {
 		counts[f.Severity]++
 		if f.FixState == "fixed" {
@@ -107,8 +123,12 @@ func (s *Store) IngestReport(ctx context.Context, m IngestMeta, rep *grype.Repor
 		}
 		k := f.VulnID + "|" + f.PkgName + "|" + f.PkgType + "|" + f.Location
 		current[k] = true
-		if _, ok := prev[k]; !ok && prevScan.Valid {
-			newCount++
+		if _, ok := prev[k]; !ok {
+			if prevScan.Valid {
+				newCount++
+			}
+			fresh = append(fresh, NewFinding{VulnID: f.VulnID, Severity: f.Severity, KEV: f.KEV,
+				PkgName: f.PkgName, PkgVersion: f.PkgVersion, FixVersion: f.FixVersions})
 		}
 	}
 	fixedCount := 0
@@ -193,8 +213,12 @@ func (s *Store) IngestReport(ctx context.Context, m IngestMeta, rep *grype.Repor
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return &IngestResult{HostID: hostID, TargetID: targetID, ScanID: scanID, Target: targetName,
-		Findings: len(findings), New: newCount, Fixed: fixedCount}, nil
+	res := &IngestResult{HostID: hostID, TargetID: targetID, ScanID: scanID, Target: targetName,
+		Findings: len(findings), New: newCount, Fixed: fixedCount, NewFindings: fresh}
+	if s.onIngest != nil {
+		s.onIngest(m, res)
+	}
+	return res, nil
 }
 
 func upsertHost(ctx context.Context, tx *sql.Tx, m IngestMeta, ts string) (int64, error) {

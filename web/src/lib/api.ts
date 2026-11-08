@@ -206,6 +206,7 @@ export interface SystemInfo {
   version: string
   auth_enabled: boolean
   max_report_mb: number
+  notify: { enabled: boolean; format: string; min_severity: string; kev: boolean }
   scanner: {
     available: boolean
     grype_version: string

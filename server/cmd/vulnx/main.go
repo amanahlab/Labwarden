@@ -16,6 +16,7 @@ import (
 
 	"github.com/coronas2k/vulnx/agent"
 	"github.com/coronas2k/vulnx/server/internal/api"
+	"github.com/coronas2k/vulnx/server/internal/notify"
 	"github.com/coronas2k/vulnx/server/internal/scanner"
 	"github.com/coronas2k/vulnx/server/internal/store"
 	"github.com/coronas2k/vulnx/web"
@@ -67,6 +68,18 @@ func run(log *slog.Logger) error {
 	}
 	maxMB, _ := strconv.ParseInt(env("VULNX_MAX_REPORT_MB", "256"), 10, 64)
 
+	nt, err := notify.New(notify.Config{
+		URL:         os.Getenv("VULNX_NOTIFY_URL"),
+		Format:      env("VULNX_NOTIFY_FORMAT", "json"),
+		MinSeverity: env("VULNX_NOTIFY_MIN_SEVERITY", "Critical"),
+		KEV:         env("VULNX_NOTIFY_KEV", "true") == "true",
+		PublicURL:   os.Getenv("VULNX_PUBLIC_URL"),
+	}, st, log)
+	if err != nil {
+		return err
+	}
+	st.OnIngest(nt.Ingested)
+
 	sc := scanner.New(env("VULNX_GRYPE_BIN", "grype"), st, log)
 	go sc.Run(ctx, env("VULNX_SCHEDULER", "true") == "true", 6*time.Hour)
 	go housekeeping(ctx, st, log)
@@ -74,7 +87,7 @@ func run(log *slog.Logger) error {
 	srv := api.New(api.Config{
 		Version: version, AdminPassword: adminPw, SessionKey: key,
 		CookieSecure: env("VULNX_COOKIE_SECURE", "false") == "true", MaxReportMB: maxMB,
-	}, st, sc, log, web.FS(), agent.FS)
+	}, st, sc, nt, log, web.FS(), agent.FS)
 
 	_ = st.AddEvent(ctx, store.Event{Level: "info", Source: "system", Message: "VulnX " + version + " started"})
 	httpSrv := &http.Server{

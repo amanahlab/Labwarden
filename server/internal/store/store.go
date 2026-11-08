@@ -15,6 +15,8 @@ import (
 type Store struct {
 	w *sql.DB // single connection: all writes serialize here
 	r *sql.DB // read pool (WAL lets readers run during writes)
+
+	onIngest func(IngestMeta, *IngestResult)
 }
 
 func Open(path string) (*Store, error) {

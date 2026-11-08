@@ -23,7 +23,7 @@ import {
   Tabs,
   Text,
 } from "@chakra-ui/react"
-import { LuKeyRound, LuPlay, LuPlus, LuTrash2 } from "react-icons/lu"
+import { LuBell, LuKeyRound, LuPlay, LuPlus, LuTrash2 } from "react-icons/lu"
 import { api, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
 import { ago, dateTime } from "@/lib/format"
 import { DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel } from "@/components/common"
@@ -332,6 +332,30 @@ function ConfirmButton({ label, body, action, onConfirm }: { label: string; body
   )
 }
 
+function NotifyStatus({ n }: { n: SystemInfo["notify"] }) {
+  const test = useMutation({
+    mutationFn: () => api.post("/notify/test"),
+    onSuccess: () => toaster.create({ type: "success", title: "Test notification sent" }),
+    onError: onError("Test notification failed"),
+  })
+  if (!n.enabled)
+    return (
+      <Text color="fg.muted">
+        Off. Set <Code size="sm">VULNX_NOTIFY_URL</Code> to get alerts about new findings.
+      </Text>
+    )
+  return (
+    <HStack gap="3" wrap="wrap">
+      <Text>
+        {n.format} webhook · new {n.min_severity}+{n.kev ? " or known exploited" : ""}
+      </Text>
+      <Button size="xs" variant="outline" loading={test.isPending} onClick={() => test.mutate()}>
+        <LuBell /> Send test
+      </Button>
+    </HStack>
+  )
+}
+
 function SystemPanel() {
   const q = useQuery({ queryKey: ["system"], queryFn: () => api.get<SystemInfo>("/system"), refetchInterval: 15_000 })
   const s = q.data
@@ -389,6 +413,12 @@ function SystemPanel() {
           <DataList.Item>
             <DataList.ItemLabel>Max report size</DataList.ItemLabel>
             <DataList.ItemValue>{s.max_report_mb} MB</DataList.ItemValue>
+          </DataList.Item>
+          <DataList.Item>
+            <DataList.ItemLabel>Notifications</DataList.ItemLabel>
+            <DataList.ItemValue>
+              <NotifyStatus n={s.notify} />
+            </DataList.ItemValue>
           </DataList.Item>
         </DataList.Root>
       )}

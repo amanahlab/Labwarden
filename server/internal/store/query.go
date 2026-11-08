@@ -330,3 +330,22 @@ func (s *Store) SetTriage(ctx context.Context, vulnID string, hostID int64, stat
 	}
 	return s.RefreshDaily(ctx)
 }
+
+// SuppressedVulns returns the vulnerabilities triaged as ignored or false
+// positive for a host. A host-specific decision overrides the global one.
+func (s *Store) SuppressedVulns(ctx context.Context, hostID int64) (map[string]bool, error) {
+	rows, err := s.r.QueryContext(ctx, `SELECT vuln_id, status FROM triage WHERE host_id IN (0, ?) ORDER BY host_id`, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, err
+		}
+		out[id] = status == "ignored" || status == "false_positive" // host rows come last and win
+	}
+	return out, rows.Err()
+}

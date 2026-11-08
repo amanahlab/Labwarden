@@ -18,6 +18,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/coronas2k/vulnx/server/internal/notify"
 	"github.com/coronas2k/vulnx/server/internal/scanner"
 	"github.com/coronas2k/vulnx/server/internal/store"
 )
@@ -40,8 +41,12 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	agentFS := fstest.MapFS{"install.sh": {Data: []byte("#!/bin/sh\n")}, "vulnx-agent.sh": {Data: []byte("#!/bin/sh\n")}}
 	webFS := fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>VulnX</title>")}}
+	nt, err := notify.New(notify.Config{MinSeverity: "Critical"}, st, log)
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := New(Config{Version: "test", AdminPassword: testPassword, SessionKey: bytes.Repeat([]byte("k"), 32)},
-		st, scanner.New("grype-not-installed", st, log), log, webFS, agentFS)
+		st, scanner.New("grype-not-installed", st, log), nt, log, webFS, agentFS)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, st

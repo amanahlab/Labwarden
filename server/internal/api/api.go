@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/coronas2k/vulnx/server/internal/notify"
 	"github.com/coronas2k/vulnx/server/internal/scanner"
 	"github.com/coronas2k/vulnx/server/internal/store"
 )
@@ -30,17 +31,18 @@ type Server struct {
 	cfg     Config
 	st      *store.Store
 	scan    *scanner.Scanner
+	notify  *notify.Notifier
 	log     *slog.Logger
 	webFS   fs.FS // built SPA (may be empty)
 	agentFS fs.FS
 	limiter *loginLimiter
 }
 
-func New(cfg Config, st *store.Store, sc *scanner.Scanner, log *slog.Logger, webFS, agentFS fs.FS) *Server {
+func New(cfg Config, st *store.Store, sc *scanner.Scanner, nt *notify.Notifier, log *slog.Logger, webFS, agentFS fs.FS) *Server {
 	if cfg.MaxReportMB <= 0 {
 		cfg.MaxReportMB = 256
 	}
-	return &Server{cfg: cfg, st: st, scan: sc, log: log, webFS: webFS, agentFS: agentFS, limiter: newLoginLimiter()}
+	return &Server{cfg: cfg, st: st, scan: sc, notify: nt, log: log, webFS: webFS, agentFS: agentFS, limiter: newLoginLimiter()}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -91,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/central-targets/{id}", s.deleteCentral)
 			r.Post("/central-targets/{id}/scan", s.scanCentral)
 			r.Get("/system", s.system)
+			r.Post("/notify/test", s.testNotify)
 		})
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
 	})

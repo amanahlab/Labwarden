@@ -386,5 +386,14 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		"auth_enabled":  s.authEnabled(),
 		"scanner":       s.scan.Status(),
 		"max_report_mb": s.cfg.MaxReportMB,
+		"notify":        s.notify.Status(),
 	})
+}
+
+func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
+	if err := s.notify.Test(r.Context()); err != nil {
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
 }
