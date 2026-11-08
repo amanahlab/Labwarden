@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -195,6 +196,32 @@ func TestIngestPlainAndGzip(t *testing.T) {
 	getJSON(t, c, ts.URL+"/api/v1/vulnerabilities", &vulns)
 	if vulns.Total == 0 {
 		t.Fatal("expected vulnerabilities after ingest")
+	}
+	var byHost struct {
+		Total int `json:"total"`
+	}
+	if code := getJSON(t, c, ts.URL+"/api/v1/findings/by-host", &byHost); code != http.StatusOK || byHost.Total != 2 {
+		t.Fatalf("findings by host: status %d total %d, want 200 and 2", code, byHost.Total)
+	}
+	var byLoc struct {
+		Total int `json:"total"`
+		Items []struct {
+			Location string `json:"location"`
+			Total    int    `json:"total"`
+			TargetID int64  `json:"target_id"`
+		} `json:"items"`
+	}
+	if code := getJSON(t, c, ts.URL+"/api/v1/findings/by-location?sort=location&order=desc", &byLoc); code != http.StatusOK || byLoc.Total == 0 {
+		t.Fatalf("findings by location: status %d total %d", code, byLoc.Total)
+	}
+	top := byLoc.Items[0]
+	var drill struct {
+		Total int `json:"total"`
+	}
+	q := url.Values{"location": {top.Location}, "target_id": {strconv.FormatInt(top.TargetID, 10)}}
+	getJSON(t, c, ts.URL+"/api/v1/findings?"+q.Encode(), &drill)
+	if top.Location == "" || drill.Total != top.Total {
+		t.Fatalf("drill into %q: total %d, want %d", top.Location, drill.Total, top.Total)
 	}
 }
 

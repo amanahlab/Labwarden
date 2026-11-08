@@ -107,6 +107,7 @@ type FindingFilter struct {
 	HostID   int64
 	TargetID int64
 	VulnID   string
+	Location string // exact package path; "" = any
 	Group    string
 	PkgType  string
 	KEV      bool
@@ -130,6 +131,9 @@ func (f FindingFilter) apply(w *where) {
 	}
 	if f.VulnID != "" {
 		w.add("cf.vuln_id = ?", f.VulnID)
+	}
+	if f.Location != "" {
+		w.add("cf.location = ?", f.Location)
 	}
 	if f.Group != "" {
 		w.add("cf.grp = ?", f.Group)
