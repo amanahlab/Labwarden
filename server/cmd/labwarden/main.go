@@ -66,8 +66,13 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	adminPw := os.Getenv("LABWARDEN_ADMIN_PASSWORD")
-	if adminPw == "" {
-		log.Warn("LABWARDEN_ADMIN_PASSWORD is not set: the dashboard is open to anyone who can reach it")
+	authOff := env("LABWARDEN_AUTH_DISABLED", "false") == "true"
+	if err := api.CheckAuthConfig(adminPw, authOff); err != nil {
+		return err
+	}
+	proxies, err := api.ParseTrustedProxies(os.Getenv("LABWARDEN_TRUSTED_PROXIES"))
+	if err != nil {
+		return err
 	}
 	maxMB, _ := strconv.ParseInt(env("LABWARDEN_MAX_REPORT_MB", "256"), 10, 64)
 
@@ -114,11 +119,12 @@ func run(log *slog.Logger) error {
 			log.Error("stop jobs", "err", err)
 		}
 	}()
-	go housekeeping(ctx, st, log)
+	go housekeeping(ctx, st, log, authOff)
 
 	srv := api.New(api.Config{
 		Version: version, AdminPassword: adminPw, SessionKey: key,
 		CookieSecure: env("LABWARDEN_COOKIE_SECURE", "false") == "true", MaxReportMB: maxMB,
+		TrustedProxies: proxies, PublicURL: os.Getenv("LABWARDEN_PUBLIC_URL"),
 	}, st, sc, q, nt, log, web.FS(), agent.FS)
 
 	_ = st.AddEvent(ctx, store.Event{Level: "info", Source: "system", Message: "LabWarden " + version + " started"})
@@ -126,6 +132,7 @@ func run(log *slog.Logger) error {
 		Addr:              env("LABWARDEN_ADDR", ":8080"),
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 		ReadTimeout:       5 * time.Minute, // large reports over slow links
 		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
@@ -147,8 +154,8 @@ func run(log *slog.Logger) error {
 	return httpSrv.Shutdown(shutdown)
 }
 
-// sessionKey loads or creates the HMAC key that signs admin sessions, so
-// sessions survive restarts.
+// sessionKey loads or creates the key that fingerprints the admin password
+// for sessions (see api.passwordFingerprint), so sessions survive restarts.
 func sessionKey(path string) ([]byte, error) {
 	if b, err := os.ReadFile(path); err == nil && len(b) >= 32 {
 		return b, nil
@@ -160,17 +167,25 @@ func sessionKey(path string) ([]byte, error) {
 	return b, os.WriteFile(path, b, 0o600)
 }
 
-// housekeeping keeps one trend point per day and bounds the event log.
-func housekeeping(ctx context.Context, st *store.Store, log *slog.Logger) {
+// housekeeping keeps one trend point per day, bounds the event log and drops
+// ended sessions. With authentication off it says so every hour, so it is
+// not forgotten.
+func housekeeping(ctx context.Context, st *store.Store, log *slog.Logger, authOff bool) {
 	keep, _ := strconv.Atoi(env("LABWARDEN_EVENT_RETENTION", "50000"))
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
+		if authOff {
+			log.Warn("LABWARDEN_AUTH_DISABLED=true: the dashboard is open to anyone who can reach it")
+		}
 		if err := st.RefreshDaily(ctx); err != nil && ctx.Err() == nil {
 			log.Error("refresh daily stats", "err", err)
 		}
 		if err := st.PruneEvents(ctx, keep); err != nil && ctx.Err() == nil {
 			log.Error("prune events", "err", err)
+		}
+		if err := st.PruneSessions(ctx, api.SessionIdleTimeout); err != nil && ctx.Err() == nil {
+			log.Error("prune sessions", "err", err)
 		}
 		select {
 		case <-ctx.Done():

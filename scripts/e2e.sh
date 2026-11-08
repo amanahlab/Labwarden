@@ -8,7 +8,7 @@ cd "$ROOT"
 [ -f .env ] || scripts/dev-env.sh
 set -a; . ./.env; set +a
 URL="http://localhost:${LABWARDEN_PORT:-8080}"
-JAR=$(mktemp); trap 'rm -f "$JAR"' EXIT
+JAR=$(mktemp) JAR2=$(mktemp); trap 'rm -f "$JAR" "$JAR2"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok   $*"; }
@@ -143,4 +143,24 @@ case "$code" in 202 | 409) pass "Update DB now accepted ($code)" ;; *) fail "Upd
 echo "== logs"
 api "$URL/api/v1/events?source=agent&size=1" | jqr -e '.total > 0' >/dev/null || fail "no agent events"
 pass "agent events recorded"
+
+echo "== admin auth"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$JAR" -X POST -H 'Origin: https://evil.example' "$URL/api/v1/db/update")
+[ "$code" = 403 ] || fail "cross-site POST: status $code, want 403"
+pass "cross-site POST refused"
+printf '{"password":"%s"}' "$LABWARDEN_ADMIN_PASSWORD" |
+  curl -fsS -o /dev/null -c "$JAR2" -H 'Content-Type: application/json' --data-binary @- "$URL/api/v1/auth/login" || fail "second login"
+curl -fsS -o /dev/null -b "$JAR2" -X POST "$URL/api/v1/auth/logout" || fail "logout"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$JAR2" "$URL/api/v1/summary")
+[ "$code" = 401 ] || fail "session cookie replayed after logout: status $code, want 401"
+pass "logout ends the session on the server"
+# Last: this locks the e2e client out of logging in for a while.
+i=0 code=
+while [ $i -lt 10 ]; do
+  i=$((i + 1))
+  code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -H "X-Forwarded-For: 198.51.100.$i" \
+    --data-binary '{"password":"wrong"}' "$URL/api/v1/auth/login")
+done
+[ "$code" = 429 ] || fail "bad logins with a new X-Forwarded-For each time: last status $code, want 429"
+pass "login lockout ignores a forged X-Forwarded-For"
 echo "e2e passed"

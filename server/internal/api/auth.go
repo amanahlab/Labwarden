@@ -4,48 +4,74 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
-	"net"
+	"encoding/hex"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
+// An admin session ends after SessionIdleTimeout without use, and after
+// sessionMaxAge in any case.
 const (
-	sessionCookie = "labwarden_session"
-	sessionTTL    = 7 * 24 * time.Hour
+	SessionIdleTimeout = 24 * time.Hour
+	sessionMaxAge      = 7 * 24 * time.Hour
+	sessionCookie      = "labwarden_session"
+
+	loginBudget       = 30 // failed logins from all clients together per window
+	loginBudgetWindow = 10 * time.Minute
 )
 
 func (s *Server) authEnabled() bool { return s.cfg.AdminPassword != "" }
 
-// signSession returns "<expiry>.<hmac>"; the session carries no other state.
-func (s *Server) signSession(exp time.Time) string {
-	v := strconv.FormatInt(exp.Unix(), 10)
-	m := hmac.New(sha256.New, s.cfg.SessionKey)
-	m.Write([]byte(v))
-	return v + "." + base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+// passwordFingerprint ties sessions to the admin password they were opened
+// with: change the password and every session ends.
+func passwordFingerprint(key []byte, password string) string {
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte(password))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// sessionCookieName is the cookie's name for requests like r. Over HTTPS the
+// cookie is Secure and carries the __Host- prefix, so the browser never sends
+// it over plain HTTP and nothing on another subdomain can set or overwrite it.
+func (s *Server) sessionCookieName(r *http.Request) string {
+	if s.secureCookie(r) {
+		return "__Host-" + sessionCookie
+	}
+	return sessionCookie
+}
+
+// secureCookie: an https LABWARDEN_PUBLIC_URL only counts for requests to its
+// host, so the dashboard still works when opened by plain-HTTP LAN address.
+func (s *Server) secureCookie(r *http.Request) bool {
+	return s.cfg.CookieSecure || s.viaHTTPS(r) ||
+		s.public != nil && s.public.Scheme == "https" && strings.EqualFold(r.Host, s.public.Host)
+}
+
+// setSessionCookie sets the session cookie, or deletes it when id is empty.
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, id string) {
+	maxAge := int(sessionMaxAge.Seconds())
+	if id == "" {
+		maxAge = -1
+	}
+	http.SetCookie(w, &http.Cookie{Name: s.sessionCookieName(r), Value: id, Path: "/", MaxAge: maxAge,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.secureCookie(r)})
 }
 
 func (s *Server) validSession(r *http.Request) bool {
-	c, err := r.Cookie(sessionCookie)
+	c, err := r.Cookie(s.sessionCookieName(r))
 	if err != nil {
 		return false
 	}
-	v, sig, ok := strings.Cut(c.Value, ".")
-	if !ok {
-		return false
+	ok, err := s.st.ValidSession(r.Context(), c.Value, s.pwFP, SessionIdleTimeout)
+	if err != nil {
+		s.log.Error("check session", "err", err)
 	}
-	exp, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || time.Now().Unix() > exp {
-		return false
-	}
-	want := s.signSession(time.Unix(exp, 0))
-	_, wantSig, _ := strings.Cut(want, ".")
-	return hmac.Equal([]byte(sig), []byte(wantSig))
+	return ok
 }
 
 func (s *Server) requireSession(next http.Handler) http.Handler {
@@ -54,9 +80,10 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "login required")
 			return
 		}
-		// Mutations must be JSON (or bodiless); together with SameSite=Strict
-		// this blocks cross-site form posts.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.ContentLength > 0 &&
+		// Mutations must be JSON (or bodiless), a second line of defence
+		// against cross-site form posts. ContentLength is -1 for a chunked
+		// body, which must not slip past.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.ContentLength != 0 &&
 			!strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 			writeErr(w, http.StatusUnsupportedMediaType, "expected application/json")
 			return
@@ -73,7 +100,7 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 			return
 		}
 		if _, valid := s.st.VerifyToken(r.Context(), strings.TrimSpace(tok)); !valid {
-			s.event(r, "warn", "auth", r.URL.Query().Get("host"), "", "rejected ingest request with invalid token from "+clientIP(r))
+			s.event(r, "warn", "auth", r.URL.Query().Get("host"), "", "rejected ingest request with invalid token from "+s.clientIP(r))
 			writeErr(w, http.StatusUnauthorized, "invalid token")
 			return
 		}
@@ -86,8 +113,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "auth_enabled": false})
 		return
 	}
-	ip := clientIP(r)
-	if wait := s.limiter.blocked(ip); wait > 0 {
+	ip := s.clientIP(r)
+	wait := s.limiter.blocked(ip)
+	if wait == 0 && s.limiter.failed(ip) {
+		wait = s.budget.wait()
+	}
+	if wait > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		writeErr(w, http.StatusTooManyRequests, "too many attempts, try again later")
 		return
@@ -104,87 +135,62 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
 		s.limiter.fail(ip)
 		s.event(r, "warn", "auth", "", "", "failed admin login from "+ip)
+		if s.budget.spend() {
+			s.event(r, "warn", "auth", "", "", fmt.Sprintf("more than %d failed admin logins in %s from all addresses together: addresses that already failed are paused until the rate drops", loginBudget, loginBudgetWindow))
+		}
 		writeErr(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
 	s.limiter.reset(ip)
-	exp := time.Now().Add(sessionTTL)
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: s.signSession(exp), Path: "/", Expires: exp,
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.cfg.CookieSecure || r.TLS != nil,
-	})
+	id, err := s.st.CreateSession(r.Context(), ip, r.UserAgent(), s.pwFP, sessionMaxAge)
+	if err != nil {
+		s.log.Error("create session", "err", err)
+		writeErr(w, http.StatusInternalServerError, "could not start a session")
+		return
+	}
+	s.setSessionCookie(w, r, id)
 	s.event(r, "info", "auth", "", "", "admin login from "+ip)
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "auth_enabled": true})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	if c, err := r.Cookie(s.sessionCookieName(r)); err == nil {
+		if err := s.st.DeleteSession(r.Context(), c.Value); err != nil {
+			s.log.Error("delete session", "err", err)
+			writeErr(w, http.StatusInternalServerError, "could not end the session")
+			return
+		}
+	}
+	s.setSessionCookie(w, r, "")
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": false})
 }
 
+// logoutAll ends every admin session, this one included.
+func (s *Server) logoutAll(w http.ResponseWriter, r *http.Request) {
+	n, err := s.st.DeleteAllSessions(r.Context())
+	if err != nil {
+		s.log.Error("delete sessions", "err", err)
+		writeErr(w, http.StatusInternalServerError, "could not end the sessions")
+		return
+	}
+	s.event(r, "info", "auth", "", "", fmt.Sprintf("all admin sessions ended (%d) from %s", n, s.clientIP(r)))
+	s.setSessionCookie(w, r, "")
+	writeJSON(w, http.StatusOK, map[string]int64{"ended": n})
+}
+
+// me tells the UI whether to show the login page. The version, which would
+// help an attacker pick exploits, is only for signed-in users.
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": !s.authEnabled() || s.validSession(r),
-		"auth_enabled":  s.authEnabled(),
-		"version":       s.cfg.Version,
-	})
+	authed := !s.authEnabled() || s.validSession(r)
+	out := map[string]any{"authenticated": authed, "auth_enabled": s.authEnabled()}
+	if authed {
+		out["version"] = s.cfg.Version
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) event(r *http.Request, level, source, host, runID, msg string) {
 	if err := s.st.AddEvent(r.Context(), store.Event{Level: level, Source: source, Host: host, RunID: runID, Message: msg}); err != nil {
 		s.log.Error("add event", "err", err)
 	}
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-// loginLimiter locks an IP out for a while after repeated failures.
-type loginLimiter struct {
-	mu   sync.Mutex
-	hits map[string]*attempts
-}
-
-type attempts struct {
-	n     int
-	until time.Time
-}
-
-func newLoginLimiter() *loginLimiter { return &loginLimiter{hits: map[string]*attempts{}} }
-
-func (l *loginLimiter) blocked(ip string) time.Duration {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if a, ok := l.hits[ip]; ok && time.Now().Before(a.until) {
-		return time.Until(a.until)
-	}
-	return 0
-}
-
-func (l *loginLimiter) fail(ip string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	a, ok := l.hits[ip]
-	if !ok {
-		if len(l.hits) > 10000 {
-			l.hits = map[string]*attempts{}
-		}
-		a = &attempts{}
-		l.hits[ip] = a
-	}
-	a.n++
-	if a.n >= 5 {
-		a.until = time.Now().Add(time.Duration(a.n-4) * 30 * time.Second)
-	}
-}
-
-func (l *loginLimiter) reset(ip string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.hits, ip)
 }
