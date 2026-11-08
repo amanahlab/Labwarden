@@ -91,6 +91,65 @@ func TestIngestAndQuery(t *testing.T) {
 		t.Fatalf("fresh host status = %q", hosts.Items[0].Status)
 	}
 
+	// By host: one row per host, matching the Hosts page totals.
+	vh, err := s.ListVulnHosts(ctx, FindingFilter{}, Page{Sort: "x; DROP TABLE hosts"})
+	if err != nil || vh.Total != 2 || len(vh.Items) != 2 {
+		t.Fatalf("vuln hosts: %v %+v", err, vh)
+	}
+	hostTotal := map[int64]int{}
+	for _, h := range hosts.Items {
+		hostTotal[h.ID] = h.Total
+	}
+	for _, h := range vh.Items {
+		if h.Total != hostTotal[h.HostID] || h.Vulns == 0 || h.Vulns > h.Total {
+			t.Fatalf("vuln host %s: total=%d vulns=%d, hosts page total=%d", h.HostName, h.Total, h.Vulns, hostTotal[h.HostID])
+		}
+	}
+	crit, err := s.ListVulnHosts(ctx, FindingFilter{Severity: []string{"Critical"}}, Page{})
+	if err != nil || len(crit.Items) == 0 {
+		t.Fatalf("critical vuln hosts: %v %+v", err, crit)
+	}
+	for _, h := range crit.Items {
+		if h.Total != h.Critical || h.High != 0 {
+			t.Fatalf("severity filter not applied: %+v", h)
+		}
+	}
+
+	// By location: drilling into a row's target and path returns exactly its findings.
+	locs, err := s.ListVulnLocations(ctx, FindingFilter{}, Page{Size: 500, Sort: "total"})
+	if err != nil || locs.Total == 0 {
+		t.Fatalf("locations: %v %+v", err, locs)
+	}
+	sum0 := 0
+	for _, l := range locs.Items {
+		if l.TargetID == 0 || l.HostID == 0 {
+			t.Fatalf("location without target/host: %+v", l)
+		}
+		sum0 += l.Total
+	}
+	if sum0 != sum.Findings.Total {
+		t.Fatalf("location totals %d != findings %d", sum0, sum.Findings.Total)
+	}
+	var top LocationRow
+	for _, l := range locs.Items {
+		if l.Location != "" {
+			top = l
+			break
+		}
+	}
+	if top.Location == "" {
+		t.Fatal("no finding has a location")
+	}
+	drill, err := s.ListFindings(ctx, FindingFilter{TargetID: top.TargetID, Location: top.Location}, Page{Size: 500})
+	if err != nil || drill.Total != top.Total {
+		t.Fatalf("drill into %q: %v total=%d want %d", top.Location, err, drill.Total, top.Total)
+	}
+	for _, f := range drill.Items {
+		if f.Location != top.Location {
+			t.Fatalf("location filter returned %q", f.Location)
+		}
+	}
+
 	// Ignoring a vuln removes it from active counts.
 	before := sum.Findings.Total
 	if err := s.SetTriage(ctx, "CVE-2022-37434", 0, "ignored", "test"); err != nil {
