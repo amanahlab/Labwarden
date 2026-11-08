@@ -39,5 +39,5 @@ ENV LABWARDEN_DATA=/data \
 USER labwarden
 VOLUME /data
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD ["/usr/local/bin/labwarden", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/labwarden"]

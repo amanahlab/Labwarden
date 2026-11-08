@@ -35,6 +35,9 @@ func env(key, def string) string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
 		log.Error("fatal", "err", err)
@@ -137,9 +140,25 @@ func run(log *slog.Logger) error {
 		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 	}
+	certFile, keyFile := os.Getenv("LABWARDEN_TLS_CERT"), os.Getenv("LABWARDEN_TLS_KEY")
+	if (certFile == "") != (keyFile == "") {
+		return errors.New("set both LABWARDEN_TLS_CERT and LABWARDEN_TLS_KEY, or neither")
+	}
+	if certFile != "" {
+		certs, err := newCertReloader(certFile, keyFile, log)
+		if err != nil {
+			return err
+		}
+		go certs.watch(ctx, time.Minute)
+		httpSrv.TLSConfig = tlsConfig(certs)
+	}
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", httpSrv.Addr, "version", version)
+		log.Info("listening", "addr", httpSrv.Addr, "version", version, "tls", certFile != "")
+		if certFile != "" {
+			errc <- httpSrv.ListenAndServeTLS("", "")
+			return
+		}
 		errc <- httpSrv.ListenAndServe()
 	}()
 	select {
