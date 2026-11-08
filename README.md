@@ -107,7 +107,7 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 | `LABWARDEN_INGEST_TOKEN` | | Optional bootstrap ingest token (at least 16 characters) |
 | `LABWARDEN_DATA` | `/data` | SQLite database, job queue (`queue.db`), stored SBOMs, session key, Grype DB |
 | `LABWARDEN_ADDR` | `:8080` | |
-| `LABWARDEN_COOKIE_SECURE` | `false` | Set to `true` behind HTTPS |
+| `LABWARDEN_COOKIE_SECURE` | `false` | `true` marks the session cookie `Secure` (with the `__Host-` prefix). Automatic when the request arrives over TLS, when a trusted proxy sends `X-Forwarded-Proto: https`, or when `LABWARDEN_PUBLIC_URL` starts with `https://` |
 | `LABWARDEN_TRUSTED_PROXIES` | | Reverse proxies allowed to set `X-Forwarded-For` and `X-Forwarded-Proto`: IP addresses or CIDR ranges, comma-separated (e.g. `172.18.0.0/16`). Without it, the client address is the TCP peer, so login lockouts behind a proxy apply to the proxy as a whole |
 | `LABWARDEN_MAX_REPORT_MB` | `256` | Maximum upload size in MB; a gzipped upload may decompress to at most 4 times that |
 | `LABWARDEN_SCAN_WORKERS` | `2` | Grype processes run at once (about 115 MB each) |

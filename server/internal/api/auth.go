@@ -35,8 +35,30 @@ func passwordFingerprint(key []byte, password string) string {
 	return hex.EncodeToString(m.Sum(nil))
 }
 
+// sessionCookieName is the cookie's name for requests like r. Over HTTPS the
+// cookie is Secure and carries the __Host- prefix, so the browser never sends
+// it over plain HTTP and nothing on another subdomain can set or overwrite it.
+func (s *Server) sessionCookieName(r *http.Request) string {
+	if s.secureCookie(r) {
+		return "__Host-" + sessionCookie
+	}
+	return sessionCookie
+}
+
+func (s *Server) secureCookie(r *http.Request) bool { return s.cfg.CookieSecure || s.viaHTTPS(r) }
+
+// setSessionCookie sets the session cookie, or deletes it when id is empty.
+func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, id string) {
+	maxAge := int(sessionMaxAge.Seconds())
+	if id == "" {
+		maxAge = -1
+	}
+	http.SetCookie(w, &http.Cookie{Name: s.sessionCookieName(r), Value: id, Path: "/", MaxAge: maxAge,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.secureCookie(r)})
+}
+
 func (s *Server) validSession(r *http.Request) bool {
-	c, err := r.Cookie(sessionCookie)
+	c, err := r.Cookie(s.sessionCookieName(r))
 	if err != nil {
 		return false
 	}
@@ -116,23 +138,20 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "could not start a session")
 		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: id, Path: "/", MaxAge: int(sessionMaxAge.Seconds()),
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.cfg.CookieSecure || r.TLS != nil,
-	})
+	s.setSessionCookie(w, r, id)
 	s.event(r, "info", "auth", "", "", "admin login from "+ip)
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "auth_enabled": true})
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
+	if c, err := r.Cookie(s.sessionCookieName(r)); err == nil {
 		if err := s.st.DeleteSession(r.Context(), c.Value); err != nil {
 			s.log.Error("delete session", "err", err)
 			writeErr(w, http.StatusInternalServerError, "could not end the session")
 			return
 		}
 	}
-	s.clearSessionCookie(w, r)
+	s.setSessionCookie(w, r, "")
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": false})
 }
 
@@ -145,13 +164,8 @@ func (s *Server) logoutAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.event(r, "info", "auth", "", "", fmt.Sprintf("all admin sessions ended (%d) from %s", n, s.clientIP(r)))
-	s.clearSessionCookie(w, r)
+	s.setSessionCookie(w, r, "")
 	writeJSON(w, http.StatusOK, map[string]int64{"ended": n})
-}
-
-func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.cfg.CookieSecure || r.TLS != nil})
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {

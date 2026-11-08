@@ -42,6 +42,14 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 // newTestServerWith lets a test adjust the server config before it starts.
 func newTestServerWith(t *testing.T, configure func(*Config)) (*httptest.Server, *store.Store) {
 	t.Helper()
+	srv, st := newTestAPI(t, configure)
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts, st
+}
+
+func newTestAPI(t *testing.T, configure func(*Config)) (*Server, *store.Store) {
+	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "labwarden.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -73,10 +81,7 @@ func newTestServerWith(t *testing.T, configure func(*Config)) (*httptest.Server,
 	if configure != nil {
 		configure(&cfg)
 	}
-	srv := New(cfg, st, sc, q, nt, log, webFS, agentFS)
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
-	return ts, st
+	return New(cfg, st, sc, q, nt, log, webFS, agentFS), st
 }
 
 func fixture(t *testing.T) []byte {

@@ -78,3 +78,13 @@ func (s *Server) clientIP(r *http.Request) string {
 	}
 	return client.String()
 }
+
+// viaHTTPS reports whether the client reached us over TLS, directly or
+// through a trusted proxy that says so.
+func (s *Server) viaHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	peer, ok := peerAddr(r)
+	return ok && s.trustedProxy(peer) && strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}

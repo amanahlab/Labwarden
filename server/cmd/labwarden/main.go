@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // TZ works in images without zoneinfo
@@ -123,7 +124,8 @@ func run(log *slog.Logger) error {
 
 	srv := api.New(api.Config{
 		Version: version, AdminPassword: adminPw, SessionKey: key,
-		CookieSecure: env("LABWARDEN_COOKIE_SECURE", "false") == "true", MaxReportMB: maxMB, TrustedProxies: proxies,
+		CookieSecure: env("LABWARDEN_COOKIE_SECURE", "false") == "true" || strings.HasPrefix(os.Getenv("LABWARDEN_PUBLIC_URL"), "https://"),
+		MaxReportMB:  maxMB, TrustedProxies: proxies,
 	}, st, sc, q, nt, log, web.FS(), agent.FS)
 
 	_ = st.AddEvent(ctx, store.Event{Level: "info", Source: "system", Message: "LabWarden " + version + " started"})
