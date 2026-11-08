@@ -120,19 +120,6 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 | `LABWARDEN_NOTIFY_KEV` | `true` | Also alert on known-exploited (CISA KEV) findings below that severity |
 | `LABWARDEN_PUBLIC_URL` | | Dashboard URL used for links in alerts |
 
-### Backups
-
-`labwarden.db` and `queue.db` run in SQLite WAL mode. Recent writes sit in `labwarden.db-wal` until a checkpoint, and readers also need the `-shm` file. So a copy of only the `.db` file can miss data, and opening the DB read-only fails without write access to its directory. Back up the whole data volume with the server stopped, or take a consistent copy while it runs:
-
-```bash
-docker compose run --rm --no-deps --user root --entrypoint sh labwarden -c \
-  'apk add -q sqlite && su -s /bin/sh labwarden -c "sqlite3 /data/labwarden.db \".backup /data/labwarden-backup.db\""'
-```
-
-`sqlite3` runs as `labwarden`, not root. A WAL reader writes the `-shm` file, and a root-owned one would lock the server out.
-
-The job queue (`queue.db`) and the Grype DB need no backup. Lost jobs are rebuilt by the next agent run or re-match, and the Grype DB is downloaded again.
-
 ### Alerts
 
 After each stored report, LabWarden compares the findings with the target's previous scan. It sends one message per report that lists the new findings at or above `LABWARDEN_NOTIFY_MIN_SEVERITY`, plus any new known-exploited ones. Each vulnerability appears once, KEV first, and the message shows at most 10. A target's first scan counts every finding as new. Vulnerabilities triaged as *ignored* or *false positive*, globally or for that host, do not alert. **Settings → System → Send test** checks the setup. A failed delivery shows up under **Logs**.
