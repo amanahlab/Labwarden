@@ -373,12 +373,13 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"version":       s.cfg.Version,
-		"auth_enabled":  s.authEnabled(),
-		"scanner":       s.scan.Status(),
-		"queue":         queue,
-		"max_report_mb": s.cfg.MaxReportMB,
-		"notify":        s.notify.Status(),
+		"version":        s.cfg.Version,
+		"auth_enabled":   s.authEnabled(),
+		"scanner":        s.scan.Status(),
+		"queue":          queue,
+		"max_report_mb":  s.cfg.MaxReportMB,
+		"notify":         s.notify.Status(),
+		"install_sha256": s.agents.installSum,
 	})
 }
 

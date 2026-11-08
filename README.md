@@ -52,7 +52,7 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
 
 | Where | Mechanism |
 |---|---|
-| **VMs** | `install.sh` installs Syft, the agent and a **systemd timer** (`OnCalendar` every 6h, `RandomizedDelaySec=15m`, `Persistent=true` so missed runs catch up). Without systemd (Alpine, containers) it writes `/etc/cron.d/labwarden-agent` at a random minute. A lock prevents overlapping runs. |
+| **VMs** | `install.sh` installs Syft, the agent and a **systemd timer** (`OnCalendar` every 6h, `RandomizedDelaySec=15m`, `Persistent=true` so missed runs catch up). Without systemd (Alpine, containers) it writes `/etc/cron.d/labwarden-agent` at a random minute. A lock in `/var/lib/labwarden` prevents overlapping runs. The installer checks every download: the Syft release tarball against SHA-256 sums pinned in `install.sh`, and the agent script against the SHA-256 the dashboard writes into the `install.sh` it serves. It refuses settings that could break out of its configuration file, cron line or unit. The service runs as root (it must read every file and the Docker socket) inside a systemd sandbox: the system is read-only except `/var/lib/labwarden`, with no privilege gain and a reduced capability set. The agent passes its credential to curl in a header file, never on the command line. |
 | **Docker hosts** | The `labwarden-agent` container runs the agent, then sleeps `LABWARDEN_INTERVAL` seconds, in a loop. It lists running containers through the read-only Docker socket and catalogs each distinct image. If a tag was moved by a rebuild, it scans the image actually running. If that image was already deleted, it scans the container filesystem. `LABWARDEN_DOCKER_LABEL` limits scanning to labelled containers. |
 | **Registry images** | Added in Settings. Every N minutes the server catalogs `registry:<ref>` with Syft, keeps the SBOM and matches it, with no agent involved. Like agent SBOMs, it is re-matched against each new DB. Private registries: set `SYFT_REGISTRY_AUTH_*` (or the older `GRYPE_REGISTRY_*`, which is passed on) on the server. |
 | **Grype DB** | Only the server has it (about 3.4 GB). It checks for a new one once a day at `LABWARDEN_DB_UPDATE_AT`, downloads it next to the live copy and swaps it in, so there is never a second download and scans never wait. A new DB queues a re-match of every stored SBOM. Settings → System shows the build date, the next update and the last re-match, with **Update DB now** and **Re-match all now** buttons. Agents need no DB and no internet access. |
@@ -74,13 +74,17 @@ A host that misses more than 2.5× its reported interval is marked **stale**. A 
 
 Create an enrollment token in **Settings → Enrollment tokens**, then follow the snippets on that page. They are pre-filled with the dashboard URL. The token is only needed for the first run; revoking it later does not affect hosts that already enrolled.
 
+The SHA-256 in Settings comes from the same dashboard as `install.sh`, so over plain http it catches a broken download, not an attacker on the network: serve the dashboard over https for that (see Security model).
+
 **Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and rebuild every Docker agent. Existing tokens keep working as enrollment tokens.
 
 ```bash
-# Linux VM (systemd or cron)
-curl -fsSL http://labwarden.lan:8080/install.sh | sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh
+# Linux VM (systemd or cron): download, check against the SHA-256 shown in Settings, run
+curl -fsSL -o lw-install.sh http://labwarden.lan:8080/install.sh
+echo "<sha256 from Settings>  lw-install.sh" | sha256sum -c
+sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh lw-install.sh
 # uninstall
-curl -fsSL http://labwarden.lan:8080/install.sh | sudo sh -s -- --uninstall
+sudo sh lw-install.sh --uninstall
 
 # Docker host
 docker build -t labwarden-agent agent/

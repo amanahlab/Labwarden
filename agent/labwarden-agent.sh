@@ -23,7 +23,19 @@ set -u
 
 AGENT_VERSION="3.0.0"
 
-if [ -f /etc/labwarden/agent.env ]; then set -a; . /etc/labwarden/agent.env; set +a; fi
+# The configuration is sourced as shell code, so only a file that nobody else
+# can have written is trusted: owned by root (or this user), not group- or
+# world-writable.
+ENV_FILE=/etc/labwarden/agent.env
+if [ -f "$ENV_FILE" ]; then
+	_perm=$(ls -ln "$ENV_FILE" | awk '{print $1}') _owner=$(ls -ln "$ENV_FILE" | awk '{print $3}')
+	case "$_perm" in ?????w* | ????????w*) echo "refusing $ENV_FILE: it is group- or world-writable" >&2 && exit 1 ;; esac
+	case "$_owner" in 0 | "$(id -u)") ;; *) echo "refusing $ENV_FILE: it is not owned by root" >&2 && exit 1 ;; esac
+	set -a
+	# shellcheck disable=SC1090
+	. "$ENV_FILE"
+	set +a
+fi
 
 : "${LABWARDEN_URL:?LABWARDEN_URL is required}"
 LABWARDEN_TOKEN=${LABWARDEN_TOKEN:-}
@@ -45,14 +57,29 @@ export SYFT_CHECK_FOR_APP_UPDATE=false
 
 RUN_ID="$(date +%s)-$$"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/labwarden.XXXXXX") || exit 1
-LOCK="${TMPDIR:-/tmp}/labwarden-agent.lock"
+LOCK="$LABWARDEN_STATE/agent.lock"
 trap 'rm -rf "$WORK"' EXIT INT TERM
+(umask 077 && : >"$WORK/auth.hdr") # no credential yet: no Authorization header
 
 log() { printf '%s [%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2"; }
 
-# JSON string escaping for the few values we embed by hand.
+# JSON string escaping for the few values we embed by hand. Control
+# characters other than newline and tab are dropped, those two become spaces.
 json_str() {
-	printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n\t\r' '   ' | sed 's/^/"/; s/$/"/'
+	printf '%s' "$1" | tr '\n\t' '  ' | tr -d '\000-\037\177' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/^/"/; s/$/"/'
+}
+
+# printable <file>: up to 300 bytes of a server answer, safe to log.
+printable() {
+	head -c 300 "$1" 2>/dev/null | tr '\n\t' '  ' | tr -d '\000-\037\177'
+}
+
+# Secrets go to curl in a header file, never on its command line, where any
+# local user could read them. Only [A-Za-z0-9_-] passes, so nothing can be
+# injected into the header.
+auth_header() { # auth_header <secret> <file>
+	case "$1" in "" | *[!A-Za-z0-9_-]*) return 1 ;; esac
+	(umask 077 && printf 'Authorization: Bearer %s\n' "$1" >"$2")
 }
 
 urlenc() {
@@ -62,8 +89,8 @@ urlenc() {
 api() { # api <path> <content-type> <body-file> [extra curl args]
 	_path=$1 _ctype=$2 _file=$3
 	shift 3
-	curl -fsS --retry 3 --retry-delay 5 --max-time 120 \
-		-H "Authorization: Bearer ${CRED}" -H "Content-Type: ${_ctype}" -H "User-Agent: labwarden-agent/${AGENT_VERSION}" \
+	curl -fsS --proto =http,https --retry 3 --retry-delay 5 --max-time 120 \
+		-H "@$WORK/auth.hdr" -H "Content-Type: ${_ctype}" -H "User-Agent: labwarden-agent/${AGENT_VERSION}" \
 		--data-binary "@${_file}" "$@" "${LABWARDEN_URL}${_path}"
 }
 
@@ -82,7 +109,7 @@ load_credential() {
 	CRED=""
 	[ -f "$CRED_FILE" ] && [ "$(cat "$CRED_FILE.host" 2>/dev/null)" = "$LABWARDEN_HOST" ] || return 1
 	CRED=$(cat "$CRED_FILE")
-	case "$CRED" in "" | *[!A-Za-z0-9_]*) CRED="" && return 1 ;; esac
+	auth_header "$CRED" "$WORK/auth.hdr" || { CRED="" && return 1; }
 }
 
 # enroll: trade LABWARDEN_TOKEN for this host's credential.
@@ -91,12 +118,16 @@ enroll() {
 		log error "this host is not enrolled and LABWARDEN_TOKEN is not set; re-run install.sh with an enrollment token from Settings"
 		return 1
 	fi
+	if ! auth_header "$LABWARDEN_TOKEN" "$WORK/enroll.hdr"; then
+		log error "LABWARDEN_TOKEN is not a valid enrollment token"
+		return 1
+	fi
 	# The dashboard hands out a credential only once: make sure it can be kept.
 	mkdir -p "$LABWARDEN_STATE" && chmod 700 "$LABWARDEN_STATE" && (umask 077 && : >"$CRED_FILE.tmp") ||
 		{ log error "cannot write the credential to $LABWARDEN_STATE; not enrolling" && return 1; }
 	printf '{"host":%s}' "$(json_str "$LABWARDEN_HOST")" >"$WORK/enroll.json"
 	: >"$WORK/enrolled.json"
-	_code=$(curl -sS --max-time 60 -H "Authorization: Bearer ${LABWARDEN_TOKEN}" -H "Content-Type: application/json" \
+	_code=$(curl -sS --proto =http,https --max-time 60 -H "@$WORK/enroll.hdr" -H "Content-Type: application/json" \
 		-H "User-Agent: labwarden-agent/${AGENT_VERSION}" --data-binary "@$WORK/enroll.json" \
 		-o "$WORK/enrolled.json" -w '%{http_code}' "${LABWARDEN_URL}/api/v1/ingest/enroll")
 	case "$_code" in
@@ -106,7 +137,7 @@ enroll() {
 	*) log error "enrollment failed (HTTP ${_code:-none}); will try again on the next run" && return 1 ;;
 	esac
 	_cred=$(sed -n 's/.*"credential":"\([A-Za-z0-9_]*\)".*/\1/p' "$WORK/enrolled.json")
-	[ -n "$_cred" ] || { log error "enrollment answer carried no credential" && return 1; }
+	auth_header "$_cred" "$WORK/auth.hdr" || { log error "enrollment answer carried no credential" && return 1; }
 	mkdir -p "$LABWARDEN_STATE" && chmod 700 "$LABWARDEN_STATE"
 	(umask 077 && printf '%s' "$_cred" >"$CRED_FILE.tmp" && printf '%s' "$LABWARDEN_HOST" >"$CRED_FILE.host") &&
 		mv "$CRED_FILE.tmp" "$CRED_FILE" || { log error "could not store the credential in $CRED_FILE" && return 1; }
@@ -114,9 +145,15 @@ enroll() {
 	log info "enrolled $LABWARDEN_HOST with the dashboard"
 }
 
+os_release() { # os_release <key>: its value in /etc/os-release, unquoted
+	sed -n "s/^$1=//p" /etc/os-release | head -n1 | sed 's/^["'"'"']//; s/["'"'"']$//'
+}
+
 host_os() {
+	# Read, never sourced: os-release is data, not a script.
 	if [ -r /etc/os-release ]; then
-		(. /etc/os-release && printf '%s' "${PRETTY_NAME:-$NAME}")
+		_os=$(os_release PRETTY_NAME)
+		printf '%s' "${_os:-$(os_release NAME)}"
 	else
 		uname -s
 	fi
@@ -191,10 +228,13 @@ save_image() { # save_image <image-id> <file>
 export_container() { # export_container <container-id> <dir>: unpack its filesystem
 	mkdir -p "$2"
 	if command -v jq >/dev/null 2>&1; then
-		docker_api "/containers/$1/export" | tar -xf - -C "$2" 2>/dev/null
+		docker_api "/containers/$1/export" | tar -xof - -C "$2" 2>/dev/null
 	else
-		DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker export "$1" </dev/null | tar -xf - -C "$2" 2>/dev/null
+		DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker export "$1" </dev/null | tar -xof - -C "$2" 2>/dev/null
 	fi
+	# Busybox tar keeps setuid bits even with --no-same-permissions; nobody
+	# needs them in a tree that is only cataloged.
+	find "$2" -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} + 2>/dev/null
 	[ -d "$2/etc" ] || [ -d "$2/usr" ]
 }
 
@@ -250,7 +290,7 @@ upload() {
 }
 
 rejected() { # rejected <what>: why the server refused the last upload
-	_body=$(head -c 300 "$WORK/resp.json" 2>/dev/null)
+	_body=$(printable "$WORK/resp.json")
 	printf 'rejected %s (HTTP %s%s)' "$1" "$_code" "${_body:+: $_body}"
 }
 
@@ -300,23 +340,26 @@ scan() {
 	gzip -c "$WORK/sbom.json" >"$WORK/sbom.json.gz"
 	_q=$(query_for "$_name" "$_dur")
 	if upload "$WORK/sbom.json.gz" "$_q" 2>"$WORK/curl.err"; then
-		log info "uploaded $_name: $(cat "$WORK/resp.json")"
+		log info "uploaded $_name: $(printable "$WORK/resp.json")"
 	elif [ $? -eq 2 ]; then
 		event error "dashboard $(rejected "the SBOM of $_name")"
 		return 1
 	else
 		spool "$WORK/sbom.json.gz" "$_q"
-		log error "upload of $_name failed ($(cat "$WORK/curl.err")); SBOM spooled for the next run"
+		log error "upload of $_name failed ($(printable "$WORK/curl.err")); SBOM spooled for the next run"
 		return 1
 	fi
 }
 
 main() {
+	(umask 077 && mkdir -p "$LABWARDEN_STATE") || { log error "cannot create $LABWARDEN_STATE" && exit 1; }
 	if ! mkdir "$LOCK" 2>/dev/null; then
 		# A run killed without its trap (SIGKILL, power loss, a stopped
 		# container) leaves the lock behind; take it over if its owner is gone.
 		_pid=$(cat "$LOCK/pid" 2>/dev/null)
-		if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null &&
+		# Our own pid in there is a leftover too: a restarted container
+		# often gets the same pid as the run that was killed.
+		if [ -n "$_pid" ] && [ "$_pid" != "$$" ] && kill -0 "$_pid" 2>/dev/null &&
 			{ [ ! -r "/proc/$_pid/cmdline" ] || grep -q labwarden-agent "/proc/$_pid/cmdline"; }; then
 			log warn "another labwarden-agent run is in progress; exiting"
 			exit 0
@@ -346,7 +389,7 @@ main() {
 	# A credential that was reset, or a dashboard rebuilt from scratch: enroll again, once.
 	if [ "$_code" = 401 ] && [ -n "$CRED" ]; then
 		log warn "the dashboard no longer accepts this host's credential; enrolling again"
-		rm -f "$CRED_FILE" "$CRED_FILE.host"
+		rm -f "$CRED_FILE" "$CRED_FILE.host" "$WORK/auth.hdr"
 		CRED=""
 		enroll && run_status started "$_started"
 	fi

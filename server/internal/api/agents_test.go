@@ -3,12 +3,16 @@ package api
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 
+	"github.com/amanahlab/labwarden/agent"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
@@ -182,5 +186,25 @@ func TestCreateEnrollmentToken(t *testing.T) {
 	}
 	if code, _ := post(`{"name":"x","ttl_hours":-1}`); code != http.StatusBadRequest {
 		t.Fatalf("negative ttl: status %d, want 400", code)
+	}
+}
+
+// The served installer carries the checksum of the served agent script, and
+// /system reports the installer's own checksum.
+func TestInstallerCarriesAgentChecksum(t *testing.T) {
+	files := loadAgentFiles(agent.FS, slog.New(slog.DiscardHandler))
+	if len(files.install) == 0 || len(files.agent) == 0 {
+		t.Fatal("agent scripts not loaded")
+	}
+	if bytes.Contains(files.install, []byte(agentSumPlaceholder)) {
+		t.Fatal("served install.sh still has the checksum placeholder")
+	}
+	sum := sha256.Sum256(files.agent)
+	if !bytes.Contains(files.install, []byte("AGENT_SHA256="+hex.EncodeToString(sum[:])+"\n")) {
+		t.Fatal("served install.sh does not carry the agent script's SHA-256")
+	}
+	isum := sha256.Sum256(files.install)
+	if files.installSum != hex.EncodeToString(isum[:]) {
+		t.Fatalf("installSum = %q, want the SHA-256 of the served install.sh", files.installSum)
 	}
 }

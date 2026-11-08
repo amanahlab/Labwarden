@@ -2,6 +2,9 @@
 package api
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -45,7 +48,7 @@ type Server struct {
 	notify  *notify.Notifier
 	log     *slog.Logger
 	webFS   fs.FS // built SPA (may be empty)
-	agentFS fs.FS
+	agents  agentFiles
 	limiter *loginLimiter
 	budget  *failBudget // failed logins from all clients together
 	// agentLimiter and agentEvents handle bad agent tokens.
@@ -59,7 +62,7 @@ func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *no
 	if cfg.MaxReportMB <= 0 {
 		cfg.MaxReportMB = 256
 	}
-	s := &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agentFS: agentFS,
+	s := &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agents: loadAgentFiles(agentFS, log),
 		limiter: newLoginLimiter(), budget: newFailBudget(loginBudget, loginBudgetWindow),
 		agentLimiter: newLoginLimiter(), agentEvents: newEventGate(rejectedAgentEvery),
 		pwFP: passwordFingerprint(cfg.SessionKey, cfg.AdminPassword)}
@@ -144,10 +147,36 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// agentFiles are the scripts handed to hosts. install.sh carries the SHA-256
+// of the agent script and checks the download against it; installSum lets an
+// admin check install.sh itself before running it as root.
+type agentFiles struct {
+	install, agent []byte
+	installSum     string
+}
+
+const agentSumPlaceholder = "@AGENT_SHA256@"
+
+func loadAgentFiles(fsys fs.FS, log *slog.Logger) agentFiles {
+	agent, err1 := fs.ReadFile(fsys, "labwarden-agent.sh")
+	install, err2 := fs.ReadFile(fsys, "install.sh")
+	if err := errors.Join(err1, err2); err != nil {
+		log.Error("agent scripts missing from the build", "err", err)
+		return agentFiles{}
+	}
+	agentSum := sha256.Sum256(agent)
+	install = bytes.ReplaceAll(install, []byte(agentSumPlaceholder), []byte(hex.EncodeToString(agentSum[:])))
+	installSum := sha256.Sum256(install)
+	return agentFiles{install: install, agent: agent, installSum: hex.EncodeToString(installSum[:])}
+}
+
 func (s *Server) agentFile(name string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		b, err := fs.ReadFile(s.agentFS, name)
-		if err != nil {
+		b := s.agents.agent
+		if name == "install.sh" {
+			b = s.agents.install
+		}
+		if len(b) == 0 {
 			writeErr(w, http.StatusNotFound, "not found")
 			return
 		}

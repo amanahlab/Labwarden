@@ -35,6 +35,9 @@ host_id() { api "$URL/api/v1/hosts?q=$1" | jqr -e --arg n "$1" '.items[] | selec
 
 echo "== agents send SBOMs, the server matches them"
 # The VM keeps the agent it installed first; re-running install.sh is how a real host upgrades.
+# Its entrypoint execs cron once that first install is done; upgrading before then races it.
+wait_for 300 "testbed-vm first install done" \
+  docker compose --profile testbed exec -T testbed-vm grep -qx cron /proc/1/comm
 docker compose --profile testbed exec -T testbed-vm sh -c 'curl -fsSL "$LABWARDEN_URL/install.sh" | LABWARDEN_RUN_NOW=0 sh' >/dev/null ||
   fail "upgrade of the testbed-vm agent"
 pass "testbed-vm agent upgraded with install.sh"
@@ -76,6 +79,20 @@ pass "a credential only speaks for its own host"
 code=$(vm_post /api/v1/ingest/report '{}')
 [ "$code" = 404 ] || fail "/ingest/report: status $code, want 404"
 pass "/ingest/report is gone"
+# Secrets never reach a command line, where any local user could read them.
+argv_since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+docker compose --profile testbed exec -T testbed-vm sh -c '
+  b=Bear; e=vx; labwarden-agent >/tmp/argv-run.log 2>&1 & pid=$!; seen=0
+  while kill -0 "$pid" 2>/dev/null; do
+    ps -eo args >/tmp/argv.txt
+    grep -q -e "${b}er " -e "${e}a_" -e "${e}e_" /tmp/argv.txt && seen=1
+    sleep 0.2
+  done
+  grep -q "uploaded " /tmp/argv-run.log || { echo "the agent run uploaded nothing" >&2; exit 2; }
+  exit $seen' || fail "a token or credential appeared on a command line during an agent run (or the run uploaded nothing)"
+pass "no token or credential on any command line during an agent run"
+# Let that run's match land, so it cannot move last_seen in the re-match check.
+wait_for 120 "testbed-vm argv-check run matched" matched_since testbed-vm "$argv_since"
 
 echo "== re-match without an agent run"
 last_seen() { api "$URL/api/v1/hosts?q=$1" | jqr -r --arg n "$1" '.items[] | select(.name == $n) | .last_seen'; }
@@ -126,11 +143,11 @@ pass "central scan target and its host cleaned up"
 echo "== stale agent lock"
 # A run killed mid-scan (e.g. the container was stopped) leaves its lock behind.
 docker compose --profile testbed exec -T testbed-docker-agent \
-  sh -c 'mkdir -p /tmp/labwarden-agent.lock && echo 999999 >/tmp/labwarden-agent.lock/pid'
+  sh -c 'mkdir -p /var/lib/labwarden/agent.lock && echo 999999 >/var/lib/labwarden/agent.lock/pid'
 # Capture first: grep -q would close the pipe early and kill the run before its cleanup trap.
 out=$(docker compose --profile testbed exec -T testbed-docker-agent labwarden-agent 2>&1) || true
 printf '%s\n' "$out" | grep -q "removing stale lock" || fail "agent did not take over a stale lock"
-docker compose --profile testbed exec -T testbed-docker-agent test ! -e /tmp/labwarden-agent.lock ||
+docker compose --profile testbed exec -T testbed-docker-agent test ! -e /var/lib/labwarden/agent.lock ||
   fail "agent left its lock behind"
 pass "agent recovers from a stale lock"
 
