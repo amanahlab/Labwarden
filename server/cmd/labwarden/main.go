@@ -133,6 +133,7 @@ func run(log *slog.Logger) error {
 		Addr:              env("LABWARDEN_ADDR", ":8080"),
 		Handler:           srv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    64 << 10,
 		ReadTimeout:       5 * time.Minute, // large reports over slow links
 		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       2 * time.Minute,

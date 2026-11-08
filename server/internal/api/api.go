@@ -57,7 +57,7 @@ func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *no
 
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Recoverer, s.accessLog, securityHeaders, crossOriginProtection().Handler)
+	r.Use(middleware.Recoverer, s.accessLog, s.securityHeaders, crossOriginProtection().Handler)
 
 	r.Get("/healthz", s.health)
 	r.Get("/install.sh", s.agentFile("install.sh"))
@@ -249,13 +249,28 @@ func crossOriginProtection() *http.CrossOriginProtection {
 	return c
 }
 
-func securityHeaders(next http.Handler) http.Handler {
+const contentSecurityPolicy = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; " +
+	"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; form-action 'self'"
+
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
-		h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()")
+		// Browsers ignore HSTS over plain HTTP; sending it only over HTTPS
+		// keeps a plain-HTTP homelab install from advertising it at all.
+		if s.viaHTTPS(r) {
+			h.Set("Strict-Transport-Security", "max-age=31536000")
+		}
+		// API responses hold findings and settings: keep them out of caches.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			h.Set("Cache-Control", "no-store")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
