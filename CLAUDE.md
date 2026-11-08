@@ -12,7 +12,7 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 3. **Never force-push**, on any branch. Never rewrite pushed history; update a branch by merging `main` into it.
 4. No secrets in git. Tokens and passwords live in the gitignored `.env` (generate with `scripts/dev-env.sh`). Ingest tokens are stored hashed.
 5. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
-6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, River in `go.mod`, base image tags). Bump Grype and Syft together, deliberately.
+6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, base image tags). Bump Grype and Syft together, deliberately.
 7. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check current docs with ctx7 before writing against them.
 
 ## Layout

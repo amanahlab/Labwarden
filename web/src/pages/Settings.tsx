@@ -86,7 +86,10 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 
 function AgentSetup() {
   const url = window.location.origin
-  const vm = `curl -fsSL ${url}/install.sh | sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh`
+  const sys = useQuery({ queryKey: ["system"], queryFn: () => api.get<SystemInfo>("/system") })
+  const vm = `curl -fsSL -o lw-install.sh ${url}/install.sh
+echo "${sys.data?.install_sha256 || "<sha256>"}  lw-install.sh" | sha256sum -c
+sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh lw-install.sh`
   const docker = `docker run -d --name labwarden-agent --restart unless-stopped \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro \\
   -v labwarden-agent-db:/var/lib/labwarden \\
@@ -125,13 +128,14 @@ volumes:
                 many hosts; give it a short expiry or a host limit.
               </Text>
             </Step>
-            <Step n={2} title="Run the installer as root">
+            <Step n={2} title="Download the installer, check it and run it as root">
               <CodeBlock code={vm} />
               <Text textStyle="xs" color="fg.muted">
-                It installs Syft, the agent script and a systemd timer (every 6 hours, randomized by 15 minutes, catches up after downtime). Without
+                The checksum is of this dashboard's installer; the installer in turn checks Syft and the agent script before installing them.
+                It installs Syft, the agent script and a sandboxed systemd timer (every 6 hours, randomized by 15 minutes, catches up after downtime). Without
                 systemd it uses cron. The first scan starts right away. Options: <Code size="sm">LABWARDEN_SCAN_PATHS</Code>,{" "}
                 <Code size="sm">LABWARDEN_SCHEDULE</Code>, <Code size="sm">LABWARDEN_SCAN_DOCKER</Code>. Uninstall with{" "}
-                <Code size="sm">… | sudo sh -s -- --uninstall</Code>.
+                <Code size="sm">sudo sh lw-install.sh --uninstall</Code>.
               </Text>
             </Step>
             <Step n={3} title="Check progress">
