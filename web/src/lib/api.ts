@@ -188,6 +188,20 @@ export interface Token {
   prefix: string
   created_at: string
   last_used: string
+  expires_at: string // "" = never
+  max_uses: number // 0 = no limit
+  uses: number
+  revoked_at: string
+}
+
+export interface AgentCredential {
+  id: number
+  host: string
+  prefix: string
+  created_at: string
+  last_used: string
+  last_ip: string
+  enrolled_by: string
 }
 
 export interface CentralTarget {
