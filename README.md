@@ -74,6 +74,8 @@ A host that misses more than 2.5× its reported interval is marked **stale**. A 
 
 Create an enrollment token in **Settings → Enrollment tokens**, then follow the snippets on that page. They are pre-filled with the dashboard URL. The token is only needed for the first run; revoking it later does not affect hosts that already enrolled.
 
+The SHA-256 in Settings comes from the same dashboard as `install.sh`, so over plain http it catches a broken download, not an attacker on the network: serve the dashboard over https for that (see Security model).
+
 **Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and rebuild every Docker agent. Existing tokens keep working as enrollment tokens.
 
 ```bash

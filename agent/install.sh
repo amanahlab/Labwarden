@@ -57,7 +57,15 @@ validate() {
 }
 
 # fetch <url> <file>: from the dashboard, never following a redirect elsewhere.
-fetch() { curl -fsS --proto =http,https --max-time 120 -o "$2" "$1"; }
+fetch() {
+	_code=$(curl -sS --proto =http,https --max-time 120 -o "$2" -w '%{http_code}' "$1") || return 1
+	case "$_code" in
+	2??) return 0 ;;
+	3??) printf 'labwarden: error: %s redirects (HTTP %s); set LABWARDEN_URL to the address it redirects to\n' "$1" "$_code" >&2 ;;
+	*) printf 'labwarden: error: %s answered HTTP %s\n' "$1" "$_code" >&2 ;;
+	esac
+	return 1
+}
 
 # verify <file> <sha256>
 verify() { [ "$(sha256sum "$1" | awk '{print $1}')" = "$2" ]; }
@@ -171,7 +179,7 @@ ProtectHostname=yes
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 RestrictRealtime=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
