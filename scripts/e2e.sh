@@ -56,10 +56,12 @@ api -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"host_id":0,"st
 pass "triage round trip on $VID"
 
 echo "== central registry scan"
-CID=$(api -H 'Content-Type: application/json' -d '{"ref":"alpine:3.12","host_name":"registry","group":"images","interval_min":1440}' "$URL/api/v1/central-targets" | jqr -r '.id')
+CID=$(api -H 'Content-Type: application/json' -d '{"ref":"alpine:3.12","host_name":"e2e-registry","group":"e2e","interval_min":1440}' "$URL/api/v1/central-targets" | jqr -r '.id')
 central_ok() { api "$URL/api/v1/central-targets" | jqr -e --argjson id "$CID" '.[] | select(.id == $id) | .last_status == "ok"'; }
 wait_for 600 "central scan of alpine:3.12" central_ok
 api -o /dev/null -X DELETE "$URL/api/v1/central-targets/$CID"
+api -o /dev/null -X DELETE "$URL/api/v1/hosts/$(host_id e2e-registry)"
+pass "central scan target and its host cleaned up"
 
 echo "== retirement of a removed container"
 DID=$(host_id testbed-docker)
