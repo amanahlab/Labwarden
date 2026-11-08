@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -181,5 +182,40 @@ func TestTargetSBOMs(t *testing.T) {
 	}
 	if ids, _ := s.LiveSBOMTargets(ctx); len(ids) != 0 {
 		t.Fatalf("retired target still live: %v", ids)
+	}
+}
+
+func TestRematchKeepsARetiredTargetRetired(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	m := IngestMeta{Host: "docker-1", Kind: "docker", Target: "img:1"}
+	res, err := s.IngestReport(ctx, m, fixture(t, "alpine312.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.CompleteRun(ctx, m, "ok", []string{}); err != nil || n != 1 {
+		t.Fatalf("retired %d (%v)", n, err)
+	}
+	// A re-match queued before the retirement runs after it.
+	m.Rematch = true
+	if _, err := s.IngestReport(ctx, m, fixture(t, "alpine312.json")); err != nil {
+		t.Fatal(err)
+	}
+	if live, err := s.LiveSBOMTargets(ctx); err != nil {
+		t.Fatal(err)
+	} else if len(live) != 0 {
+		t.Fatalf("live targets = %v", live)
+	}
+	var retired sql.NullString
+	if err := s.r.QueryRowContext(ctx, `SELECT retired_at FROM targets WHERE id=?`, res.TargetID).Scan(&retired); err != nil || !retired.Valid {
+		t.Fatalf("re-match un-retired the target (retired_at %v, %v)", retired, err)
+	}
+	// The agent seeing it again brings it back.
+	m.Rematch = false
+	if _, err := s.IngestReport(ctx, m, fixture(t, "alpine312.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.r.QueryRowContext(ctx, `SELECT retired_at FROM targets WHERE id=?`, res.TargetID).Scan(&retired); err != nil || retired.Valid {
+		t.Fatalf("agent ingest did not revive the target (retired_at %v, %v)", retired, err)
 	}
 }

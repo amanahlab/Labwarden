@@ -90,9 +90,10 @@ func (s *Store) IngestReport(ctx context.Context, m IngestMeta, rep *grype.Repor
 		INSERT INTO targets(host_id, name, type, distro, first_seen, last_scanned)
 		VALUES (?,?,?,?,?,?)
 		ON CONFLICT(host_id, name) DO UPDATE SET
-		  type=excluded.type, distro=excluded.distro, last_scanned=excluded.last_scanned, retired_at=NULL
+		  type=excluded.type, distro=excluded.distro, last_scanned=excluded.last_scanned,
+		  retired_at=CASE WHEN ? THEN targets.retired_at ELSE NULL END
 		RETURNING id, latest_scan_id`,
-		hostID, targetName, rep.TargetType(), rep.DistroString(), ts, ts).Scan(&targetID, &prevScan)
+		hostID, targetName, rep.TargetType(), rep.DistroString(), ts, ts, m.Rematch).Scan(&targetID, &prevScan)
 	if err != nil {
 		return nil, fmt.Errorf("upsert target: %w", err)
 	}
