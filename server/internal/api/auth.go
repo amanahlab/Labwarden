@@ -75,9 +75,10 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "login required")
 			return
 		}
-		// Mutations must be JSON (or bodiless); together with SameSite=Strict
-		// this blocks cross-site form posts.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.ContentLength > 0 &&
+		// Mutations must be JSON (or bodiless), a second line of defence
+		// against cross-site form posts. ContentLength is -1 for a chunked
+		// body, which must not slip past.
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.ContentLength != 0 &&
 			!strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 			writeErr(w, http.StatusUnsupportedMediaType, "expected application/json")
 			return

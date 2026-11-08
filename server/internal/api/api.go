@@ -57,7 +57,7 @@ func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *no
 
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Recoverer, s.accessLog, securityHeaders)
+	r.Use(middleware.Recoverer, s.accessLog, securityHeaders, crossOriginProtection().Handler)
 
 	r.Get("/healthz", s.health)
 	r.Get("/install.sh", s.agentFile("install.sh"))
@@ -236,6 +236,17 @@ func qList(r *http.Request, key string) []string {
 func pageFrom(r *http.Request) store.Page {
 	q := r.URL.Query()
 	return store.Page{Page: qInt(r, "page", 1), Size: qInt(r, "size", 25), Sort: q.Get("sort"), Order: q.Get("order")}
+}
+
+// crossOriginProtection refuses state-changing requests that a browser
+// sends from another site (CSRF), including the login form. Agents and
+// other non-browser clients send neither Sec-Fetch-Site nor Origin and pass.
+func crossOriginProtection() *http.CrossOriginProtection {
+	c := http.NewCrossOriginProtection()
+	c.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeErr(w, http.StatusForbidden, "cross-origin request refused")
+	}))
+	return c
 }
 
 func securityHeaders(next http.Handler) http.Handler {
