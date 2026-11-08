@@ -409,7 +409,7 @@ function SystemPanel() {
                 </Badge>
               ) : (
                 <Badge colorPalette="red" variant="subtle" size="sm">
-                  Disabled: set LABWARDEN_ADMIN_PASSWORD
+                  Disabled: LABWARDEN_AUTH_DISABLED is set
                 </Badge>
               )}
             </DataList.ItemValue>

@@ -66,8 +66,9 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	adminPw := os.Getenv("LABWARDEN_ADMIN_PASSWORD")
-	if adminPw == "" {
-		log.Warn("LABWARDEN_ADMIN_PASSWORD is not set: the dashboard is open to anyone who can reach it")
+	authOff := env("LABWARDEN_AUTH_DISABLED", "false") == "true"
+	if err := api.CheckAuthConfig(adminPw, authOff); err != nil {
+		return err
 	}
 	proxies, err := api.ParseTrustedProxies(os.Getenv("LABWARDEN_TRUSTED_PROXIES"))
 	if err != nil {
@@ -118,7 +119,7 @@ func run(log *slog.Logger) error {
 			log.Error("stop jobs", "err", err)
 		}
 	}()
-	go housekeeping(ctx, st, log)
+	go housekeeping(ctx, st, log, authOff)
 
 	srv := api.New(api.Config{
 		Version: version, AdminPassword: adminPw, SessionKey: key,
@@ -164,12 +165,16 @@ func sessionKey(path string) ([]byte, error) {
 	return b, os.WriteFile(path, b, 0o600)
 }
 
-// housekeeping keeps one trend point per day and bounds the event log.
-func housekeeping(ctx context.Context, st *store.Store, log *slog.Logger) {
+// housekeeping keeps one trend point per day and bounds the event log. With
+// authentication off it says so every hour, so it is not forgotten.
+func housekeeping(ctx context.Context, st *store.Store, log *slog.Logger, authOff bool) {
 	keep, _ := strconv.Atoi(env("LABWARDEN_EVENT_RETENTION", "50000"))
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
+		if authOff {
+			log.Warn("LABWARDEN_AUTH_DISABLED=true: the dashboard is open to anyone who can reach it")
+		}
 		if err := st.RefreshDaily(ctx); err != nil && ctx.Err() == nil {
 			log.Error("refresh daily stats", "err", err)
 		}
