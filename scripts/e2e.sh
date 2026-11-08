@@ -35,6 +35,9 @@ host_id() { api "$URL/api/v1/hosts?q=$1" | jqr -e --arg n "$1" '.items[] | selec
 
 echo "== agents send SBOMs, the server matches them"
 # The VM keeps the agent it installed first; re-running install.sh is how a real host upgrades.
+# Its entrypoint execs cron once that first install is done; upgrading before then races it.
+wait_for 300 "testbed-vm first install done" \
+  docker compose --profile testbed exec -T testbed-vm grep -qx cron /proc/1/comm
 docker compose --profile testbed exec -T testbed-vm sh -c 'curl -fsSL "$LABWARDEN_URL/install.sh" | LABWARDEN_RUN_NOW=0 sh' >/dev/null ||
   fail "upgrade of the testbed-vm agent"
 pass "testbed-vm agent upgraded with install.sh"
