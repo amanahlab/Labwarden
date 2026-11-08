@@ -351,8 +351,9 @@ function ResetCredential({ host }: { host: HostRow }) {
               <Card.Root variant="subtle" size="sm">
                 <Card.Body textStyle="sm">
                   The agent's current credential stops working at once. Its next run enrolls again with the enrollment token in its
-                  configuration, if that token is still valid; otherwise re-run install.sh with a new token. Use this when a host was rebuilt,
-                  renamed or may have been compromised. Findings and history are kept.
+                  configuration, if that token is still valid; otherwise re-run install.sh with a new token. Use this when a host was rebuilt or
+                  renamed. Findings and history are kept. If the host may be compromised, first revoke the enrollment token it used (Settings →
+                  Enrolled hosts shows which one), since its configuration holds that token.
                 </Card.Body>
               </Card.Root>
             </Dialog.Body>
