@@ -114,6 +114,7 @@ func Open(ctx context.Context, cfg Config, st *store.Store, sc *scanner.Scanner,
 	river.AddWorker(workers, &centralScanWorker{sc: sc})
 	river.AddWorker(workers, &dbUpdateWorker{q: q})
 	river.AddWorker(workers, &rematchWorker{q: q})
+	river.AddWorker(workers, &rematchAllWorker{q: q})
 	river.AddWorker(workers, &sbomGCWorker{q: q})
 	river.AddWorker(workers, &scheduleWorker{q: q})
 	river.AddWorker(workers, &matchSBOMWorker{q: q})
@@ -208,6 +209,16 @@ func (q *Queue) EnqueueRematches(ctx context.Context) (int, error) {
 		}
 	}
 	return len(ids), nil
+}
+
+// EnqueueRematchAll queues a re-match of every stored SBOM; false if one is
+// already pending.
+func (q *Queue) EnqueueRematchAll(ctx context.Context) (bool, error) {
+	res, err := q.client.Insert(ctx, RematchAllArgs{}, nil)
+	if err != nil {
+		return false, err
+	}
+	return !res.UniqueSkippedAsDuplicate, nil
 }
 
 // EnqueueDBUpdate queues a DB update; false if one is already pending.

@@ -369,9 +369,9 @@ function DBActions() {
     onError: onError("Could not queue the DB update"),
   })
   const rematch = useMutation({
-    mutationFn: () => api.post<{ targets: number }>("/rematch"),
-    onSuccess: (r) => {
-      toaster.create({ type: "info", title: `Re-matching ${r.targets} targets` })
+    mutationFn: () => api.post("/rematch"),
+    onSuccess: () => {
+      toaster.create({ type: "info", title: "Re-match of all targets queued" })
       refresh()
     },
     onError: onError("Could not queue the re-match"),

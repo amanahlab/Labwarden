@@ -356,8 +356,10 @@ func TestUpdateDBNowIsQueuedOnce(t *testing.T) {
 			t.Fatalf("request %d: status %d, want %d", i, code, want)
 		}
 	}
-	if code := post(c, "/api/v1/rematch"); code != http.StatusAccepted {
-		t.Fatalf("rematch: status %d", code)
+	for i, want := range []int{http.StatusAccepted, http.StatusConflict} {
+		if code := post(c, "/api/v1/rematch"); code != want {
+			t.Fatalf("rematch %d: status %d, want %d", i, code, want)
+		}
 	}
 	var sys struct {
 		Queue struct {

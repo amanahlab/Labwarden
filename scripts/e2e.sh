@@ -63,7 +63,7 @@ echo "== re-match without an agent run"
 last_seen() { api "$URL/api/v1/hosts?q=$1" | jqr -r --arg n "$1" '.items[] | select(.name == $n) | .last_seen'; }
 vm_seen=$(last_seen testbed-vm)
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-api -X POST "$URL/api/v1/rematch" | jqr -e '.targets >= 2' >/dev/null || fail "re-match queued too few targets"
+api -X POST "$URL/api/v1/rematch" | jqr -e '.queued' >/dev/null || fail "re-match not queued"
 wait_for 120 "testbed-vm re-matched" matched_since testbed-vm "$since"
 wait_for 120 "testbed-docker re-matched" matched_since testbed-docker "$since"
 [ "$(last_seen testbed-vm)" = "$vm_seen" ] || fail "re-match moved testbed-vm's last_seen"

@@ -419,12 +419,16 @@ func (s *Server) updateDB(w http.ResponseWriter, r *http.Request) {
 
 // rematchAll re-matches every stored SBOM against the current DB.
 func (s *Server) rematchAll(w http.ResponseWriter, r *http.Request) {
-	n, err := s.jobs.EnqueueRematches(r.Context())
+	queued, err := s.jobs.EnqueueRematchAll(r.Context())
 	if err != nil {
 		s.storeErr(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]int{"targets": n})
+	if !queued {
+		writeErr(w, http.StatusConflict, "a re-match of all targets is already queued")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
 }
 
 func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {

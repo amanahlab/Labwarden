@@ -67,15 +67,16 @@ func (w *dbUpdateWorker) Timeout(*river.Job[DBUpdateArgs]) time.Duration { retur
 
 func (w *dbUpdateWorker) Work(ctx context.Context, job *river.Job[DBUpdateArgs]) error {
 	updated, err := w.q.sc.UpdateDB(ctx, job.Args.MaxAge)
-	if err != nil || !updated {
+	if err != nil {
 		return err
 	}
-	n, err := w.q.EnqueueRematches(ctx)
-	if err != nil {
-		return fmt.Errorf("queue re-matches: %w", err)
+	// On a retry the DB may have been swapped in by the failed attempt, which
+	// then reports no update; re-matching once too often is cheap, never is not.
+	if !updated && job.Attempt == 1 {
+		return nil
 	}
-	if n > 0 {
-		w.q.event(ctx, "info", store.IngestMeta{}, fmt.Sprintf("re-matching %d targets against the new DB", n))
+	if _, err := w.q.client.Insert(ctx, RematchAllArgs{}, nil); err != nil {
+		return fmt.Errorf("queue re-match: %w", err)
 	}
 	return nil
 }
@@ -92,6 +93,33 @@ func (RematchArgs) Kind() string { return "rematch" }
 func (RematchArgs) InsertOpts() river.InsertOpts {
 	return river.InsertOpts{Queue: QueueScan, Priority: 4, MaxAttempts: 3,
 		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: pendingStates}}
+}
+
+// RematchAllArgs queues a re-match of every stored SBOM. It is its own job so
+// a failed fan-out is retried instead of lost after the DB swap succeeded.
+type RematchAllArgs struct{}
+
+func (RematchAllArgs) Kind() string { return "rematch_all" }
+
+func (RematchAllArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueMaint, MaxAttempts: 10,
+		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: pendingStates}}
+}
+
+type rematchAllWorker struct {
+	river.WorkerDefaults[RematchAllArgs]
+	q *Queue
+}
+
+func (w *rematchAllWorker) Work(ctx context.Context, job *river.Job[RematchAllArgs]) error {
+	n, err := w.q.EnqueueRematches(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		w.q.event(ctx, "info", store.IngestMeta{}, fmt.Sprintf("re-matching %d targets against the current DB", n))
+	}
+	return nil
 }
 
 type rematchWorker struct {
