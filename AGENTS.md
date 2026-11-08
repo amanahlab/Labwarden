@@ -29,7 +29,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 | React UI (Vite, Chakra UI v3, TanStack Query), embedded into the binary | `web/` |
 | Agent script, installer, Docker agent image | `agent/` |
 | Proving ground (vulnerable "VM" + docker agent) | `testbed/` |
-| Security model, how to report a vulnerability | `README.md` (Security model), `SECURITY.md` |
+| Security model, how to report a vulnerability | `README.md` (Security model), `docs/security-architecture.md` (for users), `SECURITY.md` |
 
 ## Build and test
 

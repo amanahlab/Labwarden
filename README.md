@@ -139,7 +139,7 @@ After each stored report, LabWarden compares the findings with the target's prev
 
 ## Security model
 
-Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+Report vulnerabilities as described in [SECURITY.md](SECURITY.md). For a plain-language walk-through of every safeguard and a deployment checklist, see [docs/security-architecture.md](docs/security-architecture.md).
 
 **Who can do what.**
 - **The admin** (one password) can do everything in the web UI. Sessions live on the server and can be ended from Settings. Logins are throttled per address and in total.
