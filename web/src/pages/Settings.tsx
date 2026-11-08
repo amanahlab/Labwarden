@@ -24,9 +24,9 @@ import {
   Text,
 } from "@chakra-ui/react"
 import { LuBell, LuDownload, LuKeyRound, LuLogOut, LuPlay, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu"
-import { api, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
+import { api, type AgentCredential, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
 import { ago, dateTime } from "@/lib/format"
-import { DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel } from "@/components/common"
+import { DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel, Select } from "@/components/common"
 import { toaster } from "@/components/ui/toaster"
 import { Tooltip } from "@/components/ui/tooltip"
 
@@ -35,11 +35,14 @@ const onError = (title: string) => (e: unknown) => toaster.create({ type: "error
 export function SettingsPage() {
   return (
     <>
-      <PageHeader title="Settings" description="Connect hosts, manage ingest tokens and schedule central registry scans." />
+      <PageHeader title="Settings" description="Connect hosts, manage enrollment tokens and schedule central registry scans." />
       <Stack gap="6">
         <AgentSetup />
         <Grid templateColumns={{ base: "1fr", xl: "3fr 2fr" }} gap="6" alignItems="start">
-          <Tokens />
+          <Stack gap="6">
+            <Tokens />
+            <EnrolledHosts />
+          </Stack>
           <SystemPanel />
         </Grid>
         <CentralTargets />
@@ -116,9 +119,10 @@ volumes:
         </Tabs.List>
         <Tabs.Content value="vm">
           <Stack gap="4">
-            <Step n={1} title="Create an ingest token below and replace <token>">
+            <Step n={1} title="Create an enrollment token below and replace <token>">
               <Text textStyle="sm" color="fg.muted">
-                Use one token per host, so you can revoke a single machine.
+                The agent uses it once to enroll and then keeps its own credential in <Code size="sm">/var/lib/labwarden</Code>. One token can enroll
+                many hosts; give it a short expiry or a host limit.
               </Text>
             </Step>
             <Step n={2} title="Run the installer as root">
@@ -157,7 +161,8 @@ volumes:
               reports its interval, so hosts that stay silent for more than 2.5 intervals are flagged as <i>stale</i>.
             </Text>
             <Text>
-              <b>SBOMs.</b> Syft JSON is gzipped and POSTed to <Code size="sm">/api/v1/ingest/sbom</Code> with a bearer token. The dashboard queues it
+              <b>SBOMs.</b> Syft JSON is gzipped and POSTed to <Code size="sm">/api/v1/ingest/sbom</Code> with the host's own credential, which it got by enrolling once with an
+              enrollment token. The dashboard queues it
               and matches it within seconds. If the dashboard is unreachable or busy, the SBOM is kept in a local spool and re-sent on the next run.
             </Text>
             <Text>
@@ -176,16 +181,34 @@ volumes:
   )
 }
 
+const TTL_OPTIONS: [string, string][] = [
+  ["1", "Expires in 1 hour"],
+  ["24", "Expires in 24 hours"],
+  ["168", "Expires in 7 days"],
+  ["0", "Never expires"],
+]
+
+function tokenState(t: Token): { label: string; palette: string } {
+  if (t.revoked_at) return { label: "revoked", palette: "red" }
+  if (t.expires_at && new Date(t.expires_at) <= new Date()) return { label: "expired", palette: "gray" }
+  if (t.max_uses > 0 && t.uses >= t.max_uses) return { label: "used up", palette: "gray" }
+  return { label: "active", palette: "green" }
+}
+
 function Tokens() {
   const qc = useQueryClient()
   const [name, setName] = useState("")
+  const [ttl, setTTL] = useState("24")
+  const [maxUses, setMaxUses] = useState("")
   const [created, setCreated] = useState<{ name: string; value: string } | null>(null)
   const tokens = useQuery({ queryKey: ["tokens"], queryFn: () => api.get<Token[]>("/tokens") })
   const create = useMutation({
-    mutationFn: () => api.post<{ token: Token; value: string }>("/tokens", { name: name.trim() }),
+    mutationFn: () =>
+      api.post<{ token: Token; value: string }>("/tokens", { name: name.trim(), ttl_hours: Number(ttl), max_uses: Number(maxUses) || 0 }),
     onSuccess: (r) => {
       setCreated({ name: r.token.name, value: r.value })
       setName("")
+      setMaxUses("")
       qc.invalidateQueries({ queryKey: ["tokens"] })
     },
     onError: onError("Could not create token"),
@@ -200,16 +223,32 @@ function Tokens() {
   })
 
   return (
-    <Panel title="Ingest tokens" subtitle="Agents authenticate with a bearer token. Only a SHA-256 hash is stored.">
+    <Panel
+      title="Enrollment tokens"
+      subtitle="An agent uses a token once, to enroll its host and get its own credential. Revoking a token stops new enrollments only. Only a SHA-256 hash is stored."
+    >
       <Stack gap="4">
         <HStack
           as="form"
+          flexWrap="wrap"
           onSubmit={(e) => {
             e.preventDefault()
             create.mutate()
           }}
         >
-          <Input size="sm" placeholder="Token name, e.g. nas-01" value={name} maxLength={64} onChange={(e) => setName(e.currentTarget.value)} />
+          <Input size="sm" flex="1" minW="40" placeholder="Token name, e.g. homelab VMs" value={name} maxLength={64} onChange={(e) => setName(e.currentTarget.value)} />
+          <Select label="Expiry" value={ttl} onChange={setTTL} options={TTL_OPTIONS} w="44" />
+          <Input
+            size="sm"
+            w="28"
+            type="number"
+            min={0}
+            max={10000}
+            placeholder="Max hosts"
+            aria-label="Maximum number of hosts (empty: no limit)"
+            value={maxUses}
+            onChange={(e) => setMaxUses(e.currentTarget.value)}
+          />
           <Button size="sm" type="submit" loading={create.isPending} disabled={!name.trim()}>
             <LuPlus /> Create
           </Button>
@@ -223,34 +262,50 @@ function Tokens() {
               <Table.Row>
                 <Header>Name</Header>
                 <Header>Token</Header>
-                <Header>Created</Header>
+                <Header>State</Header>
+                <Header>Hosts</Header>
+                <Header>Expires</Header>
                 <Header>Last used</Header>
                 <Header />
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {tokens.data?.map((t) => (
-                <Table.Row key={t.id}>
-                  <Table.Cell fontWeight="medium">{t.name}</Table.Cell>
-                  <Table.Cell>
-                    <Mono color="fg.muted">{t.prefix}…</Mono>
-                  </Table.Cell>
-                  <Table.Cell color="fg.muted" title={dateTime(t.created_at)}>
-                    {ago(t.created_at)}
-                  </Table.Cell>
-                  <Table.Cell color="fg.muted" title={dateTime(t.last_used)}>
-                    {ago(t.last_used)}
-                  </Table.Cell>
-                  <Table.Cell textAlign="end">
-                    <ConfirmButton
-                      label={`Revoke ${t.name}?`}
-                      body="Agents using this token will be rejected on their next upload."
-                      action="Revoke"
-                      onConfirm={() => revoke.mutate(t.id)}
-                    />
-                  </Table.Cell>
-                </Table.Row>
-              ))}
+              {tokens.data?.map((t) => {
+                const st = tokenState(t)
+                return (
+                  <Table.Row key={t.id}>
+                    <Table.Cell fontWeight="medium">{t.name}</Table.Cell>
+                    <Table.Cell>
+                      <Mono color="fg.muted">{t.prefix}…</Mono>
+                    </Table.Cell>
+                    <Table.Cell>
+                      <Badge size="sm" colorPalette={st.palette}>
+                        {st.label}
+                      </Badge>
+                    </Table.Cell>
+                    <Table.Cell color="fg.muted">
+                      {t.uses}
+                      {t.max_uses > 0 && ` / ${t.max_uses}`}
+                    </Table.Cell>
+                    <Table.Cell color="fg.muted" title={dateTime(t.expires_at)}>
+                      {t.expires_at ? dateTime(t.expires_at) : "never"}
+                    </Table.Cell>
+                    <Table.Cell color="fg.muted" title={dateTime(t.last_used)}>
+                      {ago(t.last_used)}
+                    </Table.Cell>
+                    <Table.Cell textAlign="end">
+                      {!t.revoked_at && (
+                        <ConfirmButton
+                          label={`Revoke ${t.name}?`}
+                          body="No new host can enroll with this token. Hosts that already enrolled keep their own credentials."
+                          action="Revoke"
+                          onConfirm={() => revoke.mutate(t.id)}
+                        />
+                      )}
+                    </Table.Cell>
+                  </Table.Row>
+                )
+              })}
             </Table.Body>
           </Table.Root>
         )}
@@ -292,6 +347,51 @@ function Tokens() {
           </Dialog.Positioner>
         </Portal>
       </Dialog.Root>
+    </Panel>
+  )
+}
+
+function EnrolledHosts() {
+  const creds = useQuery({ queryKey: ["agent-credentials"], queryFn: () => api.get<AgentCredential[]>("/agent-credentials") })
+  return (
+    <Panel title="Enrolled hosts" subtitle="Each host has its own credential and may only report for itself. Reset one on the host's page.">
+      {creds.error && <ErrorBox error={creds.error} />}
+      {creds.data && creds.data.length === 0 ? (
+        <Empty icon={<LuKeyRound />} title="No enrolled hosts" description="Hosts appear here after their agent's first run." />
+      ) : (
+        <Table.Root size="sm">
+          <Table.Header>
+            <Table.Row>
+              <Header>Host</Header>
+              <Header>Credential</Header>
+              <Header>Enrolled</Header>
+              <Header>Token</Header>
+              <Header>Last used</Header>
+              <Header>From</Header>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {creds.data?.map((c) => (
+              <Table.Row key={c.id}>
+                <Table.Cell fontWeight="medium">{c.host}</Table.Cell>
+                <Table.Cell>
+                  <Mono color="fg.muted">{c.prefix}…</Mono>
+                </Table.Cell>
+                <Table.Cell color="fg.muted" title={dateTime(c.created_at)}>
+                  {ago(c.created_at)}
+                </Table.Cell>
+                <Table.Cell color="fg.muted">{c.enrolled_by || "—"}</Table.Cell>
+                <Table.Cell color="fg.muted" title={dateTime(c.last_used)}>
+                  {ago(c.last_used)}
+                </Table.Cell>
+                <Table.Cell>
+                  <Mono color="fg.muted">{c.last_ip || "—"}</Mono>
+                </Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table.Root>
+      )}
     </Panel>
   )
 }

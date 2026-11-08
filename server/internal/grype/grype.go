@@ -281,7 +281,7 @@ func merge(cat *Vuln, v Vulnerability, primary bool) {
 		if cat.Severity == "" || cat.Severity == "Unknown" || SeverityRank(sev) > SeverityRank(cat.Severity) {
 			cat.Severity = sev
 		}
-		if cat.DataSource == "" {
+		if cat.DataSource == "" && webURL(v.DataSource) {
 			cat.DataSource = v.DataSource
 		}
 		if cat.Namespace == "" {
@@ -294,7 +294,7 @@ func merge(cat *Vuln, v Vulnerability, primary bool) {
 		cat.Description = strings.TrimSpace(v.Description)
 	}
 	for _, u := range v.URLs {
-		if len(cat.URLs) < 25 && !contains(cat.URLs, u) {
+		if len(cat.URLs) < 25 && webURL(u) && !contains(cat.URLs, u) {
 			cat.URLs = append(cat.URLs, u)
 		}
 	}
@@ -367,6 +367,13 @@ func normalizeFixState(s string) string {
 	default:
 		return "unknown"
 	}
+}
+
+// webURL reports whether s is an http(s) link; the dashboard renders these
+// as links, so anything else (javascript:, data:) is dropped.
+func webURL(s string) bool {
+	l := strings.ToLower(s)
+	return strings.HasPrefix(l, "https://") || strings.HasPrefix(l, "http://")
 }
 
 func contains(list []string, s string) bool {

@@ -7,7 +7,7 @@ A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog t
 - **Vulnerability detail**: description, references, CVSS, EPSS, risk, CWEs, affected packages, and triage (acknowledge, ignore, or mark as a false positive, globally or for one host).
 - **Hosts**: health (healthy, stale, failing), grouped by group or kind, plus per-host findings, targets, scan history and logs.
 - **Scans and Logs**: every report received, and every agent run, warning and error. Logs have a live tail.
-- **Settings**: ingest tokens, agent install snippets, central registry scans and system status.
+- **Settings**: enrollment tokens, enrolled hosts, agent install snippets, central registry scans and system status.
 - **Alerts**: a webhook (Slack, Discord, Mattermost, Gotify, ntfy or anything that takes JSON) when a scan finds new critical or known-exploited vulnerabilities.
 
 ## Quick start
@@ -32,7 +32,7 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
  VM (systemd timer / cron)          Docker host (agent container)        Dashboard container
  ┌──────────────────────┐           ┌──────────────────────────┐        ┌────────────────────────────┐
  │ labwarden-agent.sh   │           │ labwarden-agent.sh (loop)│        │ Go server (chi)            │
- │  syft dir:/   ───────┼── gzip ──▶│  syft docker:<image>  ───┼──────▶ │  /api/v1/ingest/* (token)  │
+ │  syft dir:/   ───────┼── gzip ──▶│  syft docker:<image>  ───┼──────▶ │  /api/v1/ingest/* (cred)   │
  │  spool on failure    │   SBOM    │  via /var/run/docker.sock│        │  job queue (River, SQLite) │
  └──────────────────────┘           └──────────────────────────┘        │  grype sbom: + grype DB    │
                                                                         │  SQLite (WAL), SBOM files  │
@@ -61,19 +61,20 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
 
 ### How SBOMs and logs are shipped
 
+0. On its first run the agent enrolls: `POST /api/v1/ingest/enroll {host}` with an **enrollment token** returns a **host credential** (`vxa_…`) bound to that host name. The agent keeps it in `/var/lib/labwarden/credential` (mode 0600) and sends it on every later request. A host that already has a credential cannot enroll again (`409`) until you reset it on its host page; a credential the server no longer knows (`401`) makes the agent re-enroll once.
 1. `POST /api/v1/ingest/run` with `status=started` reports host facts (OS, arch, IP, agent version, interval).
 2. For each target, the agent runs `syft -o syft-json`, gzips the output and sends `POST /api/v1/ingest/sbom?host=…&target=…` with `Content-Encoding: gzip`. The server stores the SBOM, answers `202 {queued, job_id}` at once and matches it on its job queue, usually within seconds; a retry of the same run and target is not matched twice. It answers `503` when the queue is backed up or less than 1 GB of disk is free. If the upload fails, the SBOM goes to a local spool (`/var/lib/labwarden/spool`, at most 20) and is re-sent on the next run.
-   `POST /api/v1/ingest/report` still takes a Grype JSON report, for agents before 2.0. The server keeps the latest SBOM of every target, i.e. each host's full package list.
+   The server keeps the latest SBOM of every target, i.e. each host's full package list.
 3. Warnings and errors go to `POST /api/v1/ingest/event` and show up under **Logs**. These include Syft failures and uploads that never arrive.
 4. `POST /api/v1/ingest/run` with `status=ok|error` closes the run with the list of targets. On a successful run, targets the agent no longer reports (for example a removed container) are **retired** from the dashboard.
 
-A host that misses more than 2.5× its reported interval is marked **stale**. A host whose last run ended in error is marked **failing**. All agent requests use `Authorization: Bearer <token>`. Tokens are created in Settings and stored only as SHA-256 hashes.
+A host that misses more than 2.5× its reported interval is marked **stale**. A host whose last run ended in error is marked **failing**. All agent requests use `Authorization: Bearer <credential>`, and a credential speaks only for its own host: a request that names another host gets `403`. Enrollment tokens are created in Settings with an expiry (1 hour, 24 hours, 7 days or never) and an optional limit on uses; they can only enroll. Tokens and credentials are stored only as SHA-256 hashes. Repeated bad tokens from one address get `429`.
 
 ## Installing agents
 
-Create a token in **Settings → Ingest tokens**, then follow the snippets on that page. They are pre-filled with the dashboard URL.
+Create an enrollment token in **Settings → Enrollment tokens**, then follow the snippets on that page. They are pre-filled with the dashboard URL. The token is only needed for the first run; revoking it later does not affect hosts that already enrolled.
 
-When upgrading, upgrade the server first. A 2.0 agent sends SBOMs to `/api/v1/ingest/sbom`, which older servers lack. The agent keeps those SBOMs in its spool until the server is upgraded. A new server still accepts reports from older agents.
+**Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and rebuild every Docker agent. Existing tokens keep working as enrollment tokens.
 
 ```bash
 # Linux VM (systemd or cron)
@@ -104,7 +105,7 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 |---|---|---|
 | `LABWARDEN_ADMIN_PASSWORD` | *(required)* | Password for the web UI, at least 12 characters. The server will not start without it. Sessions end after 24 hours unused or 7 days in any case; changing the password, or **Settings → Sign out all sessions**, ends them all |
 | `LABWARDEN_AUTH_DISABLED` | `false` | `true` runs the web UI without a password (only on a network you trust; logged every hour). Cannot be combined with a password |
-| `LABWARDEN_INGEST_TOKEN` | | Optional bootstrap ingest token (at least 16 characters) |
+| `LABWARDEN_INGEST_TOKEN` | | Optional bootstrap enrollment token (at least 16 characters, never expires). Imported once; revoking it in Settings sticks across restarts |
 | `LABWARDEN_DATA` | `/data` | SQLite database, job queue (`queue.db`), stored SBOMs, session key, Grype DB |
 | `LABWARDEN_ADDR` | `:8080` | |
 | `LABWARDEN_COOKIE_SECURE` | `false` | `true` marks the session cookie `Secure` (with the `__Host-` prefix). Automatic when the request arrives over TLS, when a trusted proxy sends `X-Forwarded-Proto: https`, or when it is for the host of an `https://` `LABWARDEN_PUBLIC_URL` |

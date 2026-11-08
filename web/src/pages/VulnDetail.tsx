@@ -32,6 +32,9 @@ interface VulnResponse {
   affected_total: number
 }
 
+// Only http(s) values from the vulnerability data become links.
+const isWebURL = (u?: string): u is string => !!u && /^https?:\/\//i.test(u)
+
 const TRIAGE_HELP: Record<TriageStatus, string> = {
   open: "Needs attention. Counted in all totals.",
   acknowledged: "Known and being worked on. Still counted as active.",
@@ -54,7 +57,7 @@ export function VulnDetailPage() {
   if (q.error) return <ErrorBox error={q.error} />
   if (!q.data) return <Skeleton h="96" rounded="lg" />
   const v = q.data.vulnerability
-  const urls = splitList(v.urls).filter((u) => /^https?:\/\//.test(u))
+  const urls = splitList(v.urls).filter(isWebURL)
   const aliases = splitList(v.aliases).filter((a) => a !== v.id)
   const cwes = splitList(v.cwes)
 
@@ -170,7 +173,7 @@ export function VulnDetailPage() {
                 <DataList.ItemValue>
                   <Stack gap="0">
                     <Text>{v.namespace || "—"}</Text>
-                    {v.data_source && (
+                    {isWebURL(v.data_source) && (
                       <CLink href={v.data_source} target="_blank" rel="noopener noreferrer" textStyle="xs" color="fg.muted" wordBreak="break-all">
                         {v.data_source}
                       </CLink>

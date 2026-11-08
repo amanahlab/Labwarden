@@ -10,20 +10,20 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/amanahlab/labwarden/server/internal/grype"
 	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 var hostnameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 
-var hostKinds = map[string]bool{"vm": true, "docker": true, "central": true, "host": true}
+// hostKinds an agent may report; "central" hosts belong to the server.
+var hostKinds = map[string]bool{"vm": true, "docker": true, "host": true}
 
-// metaFromQuery reads agent metadata from query parameters.
-func metaFromQuery(r *http.Request) (store.IngestMeta, error) {
+// metaFromQuery reads agent metadata for host from query parameters.
+func metaFromQuery(r *http.Request, host string) (store.IngestMeta, error) {
 	q := r.URL.Query()
 	m := store.IngestMeta{
-		Host:         strings.TrimSpace(q.Get("host")),
+		Host:         host,
 		Kind:         q.Get("kind"),
 		Group:        clean(q.Get("group"), 64),
 		OS:           clean(q.Get("os"), 128),
@@ -107,45 +107,15 @@ func (c *capReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (s *Server) ingestReport(w http.ResponseWriter, r *http.Request) {
-	m, err := metaFromQuery(r)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	body, err := s.body(w, r)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	defer body.Close()
-	rep, err := grype.Parse(body)
-	if err != nil {
-		var mbe *http.MaxBytesError
-		if errors.As(err, &mbe) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "report too large")
-			return
-		}
-		s.event(r, "error", "ingest", m.Host, m.RunID, "rejected report: "+err.Error())
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	res, err := s.st.IngestReport(r.Context(), m, rep)
-	if err != nil {
-		s.event(r, "error", "ingest", m.Host, m.RunID, "failed to store report: "+err.Error())
-		s.storeErr(w, r, err)
-		return
-	}
-	s.event(r, "info", "ingest", m.Host, m.RunID, fmt.Sprintf("report for %s: %d findings (%d new, %d fixed)",
-		res.Target, res.Findings, res.New, res.Fixed))
-	writeJSON(w, http.StatusCreated, res)
-}
-
 // ingestSBOM accepts a Syft JSON SBOM and queues it for matching, so agents
 // only need syft and the server holds the single vulnerability DB. It answers
 // 202 as soon as the SBOM is on disk; findings follow within seconds.
 func (s *Server) ingestSBOM(w http.ResponseWriter, r *http.Request) {
-	m, err := metaFromQuery(r)
+	host, ok := s.agentHost(w, r, strings.TrimSpace(r.URL.Query().Get("host")))
+	if !ok {
+		return
+	}
+	m, err := metaFromQuery(r, host)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -185,11 +155,11 @@ func (s *Server) ingestEvent(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "expected {host, level, message, run_id}")
 		return
 	}
-	if !hostnameRe.MatchString(e.Host) {
-		writeErr(w, http.StatusBadRequest, "invalid host")
+	host, ok := s.agentHost(w, r, strings.TrimSpace(e.Host))
+	if !ok {
 		return
 	}
-	if err := s.st.AddEvent(r.Context(), store.Event{Level: e.Level, Source: "agent", Host: e.Host,
+	if err := s.st.AddEvent(r.Context(), store.Event{Level: e.Level, Source: "agent", Host: host,
 		RunID: clean(e.RunID, 64), Message: clean(e.Message, 4000)}); err != nil {
 		s.storeErr(w, r, err)
 		return
@@ -220,7 +190,11 @@ func (s *Server) ingestRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid run payload: "+err.Error())
 		return
 	}
-	m := store.IngestMeta{Host: strings.TrimSpace(in.Host), Kind: in.Kind, Group: clean(in.Group, 64), OS: clean(in.OS, 128),
+	host, ok := s.agentHost(w, r, strings.TrimSpace(in.Host))
+	if !ok {
+		return
+	}
+	m := store.IngestMeta{Host: host, Kind: in.Kind, Group: clean(in.Group, 64), OS: clean(in.OS, 128),
 		Arch: clean(in.Arch, 32), IP: clean(in.IP, 64), AgentVersion: clean(in.AgentVersion, 32), IntervalSec: in.IntervalSec,
 		RunID: clean(in.RunID, 64)}
 	if err := validateMeta(&m); err != nil {

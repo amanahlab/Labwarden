@@ -1,7 +1,7 @@
 #!/bin/sh
 # LabWarden agent installer. Served by the dashboard at /install.sh.
 #
-#   curl -fsSL http://labwarden.lan:8080/install.sh | sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=vx_... sh
+#   curl -fsSL http://labwarden.lan:8080/install.sh | sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=vxe_... sh
 #
 # Optional: LABWARDEN_HOST, LABWARDEN_GROUP, LABWARDEN_SCAN_PATHS, LABWARDEN_SCAN_DOCKER,
 #           LABWARDEN_SCHEDULE (systemd OnCalendar, default every 6h),
@@ -37,7 +37,7 @@ if [ "${1:-}" = "--uninstall" ]; then
 fi
 
 : "${LABWARDEN_URL:?set LABWARDEN_URL to the dashboard URL}"
-: "${LABWARDEN_TOKEN:?set LABWARDEN_TOKEN to an ingest token from Settings}"
+: "${LABWARDEN_TOKEN:?set LABWARDEN_TOKEN to an enrollment token from Settings}"
 LABWARDEN_URL=${LABWARDEN_URL%/}
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
@@ -62,7 +62,8 @@ head -n1 "$BIN.tmp" | grep -q '^#!/bin/sh' || die "downloaded agent does not loo
 chmod 755 "$BIN.tmp" && mv "$BIN.tmp" "$BIN"
 say "agent installed at $BIN"
 
-# 3. configuration (contains the token: root-only)
+# 3. configuration (contains the enrollment token: root-only). The agent enrolls
+#    on its first run and keeps its own credential in /var/lib/labwarden.
 mkdir -p "$CONF_DIR" /var/lib/labwarden
 chmod 700 "$CONF_DIR" /var/lib/labwarden
 umask 077

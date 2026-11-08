@@ -57,7 +57,7 @@ func run(log *slog.Logger) error {
 	defer stop()
 
 	if tok := os.Getenv("LABWARDEN_INGEST_TOKEN"); tok != "" {
-		if _, err := st.ImportToken(ctx, "bootstrap (LABWARDEN_INGEST_TOKEN)", tok); err != nil {
+		if err := st.ImportToken(ctx, "bootstrap (LABWARDEN_INGEST_TOKEN)", tok); err != nil {
 			return err
 		}
 	}

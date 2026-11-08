@@ -23,7 +23,7 @@ import {
   Text,
   Textarea,
 } from "@chakra-ui/react"
-import { LuPencil, LuTrash2 } from "react-icons/lu"
+import { LuKeyRound, LuPencil, LuTrash2 } from "react-icons/lu"
 import { api, type EventRow, type FindingRow, type HostRow, type List, type ScanRow, type TargetRow } from "@/lib/api"
 import { ago, dateTime, interval, num } from "@/lib/format"
 import { useParamsState } from "@/lib/useParamsState"
@@ -88,6 +88,7 @@ export function HostDetailPage() {
         </Stack>
         <HStack>
           <EditHost host={h} />
+          {h.kind !== "central" && <ResetCredential host={h} />}
           <DeleteHost host={h} />
         </HStack>
       </Flex>
@@ -326,6 +327,53 @@ function EditHost({ host }: { host: HostRow }) {
   )
 }
 
+function ResetCredential({ host }: { host: HostRow }) {
+  const reset = useMutation({
+    mutationFn: () => api.del(`/hosts/${host.id}/credential`),
+    onSuccess: () => toaster.create({ type: "success", title: `Agent credential of ${host.name} reset` }),
+    onError: (e) => toaster.create({ type: "error", title: "Reset failed", description: (e as Error).message }),
+  })
+  return (
+    <Dialog.Root role="alertdialog">
+      <Dialog.Trigger asChild>
+        <Button size="sm" variant="outline" bg="surface">
+          <LuKeyRound /> Reset credential
+        </Button>
+      </Dialog.Trigger>
+      <Portal>
+        <Dialog.Backdrop />
+        <Dialog.Positioner>
+          <Dialog.Content>
+            <Dialog.Header>
+              <Dialog.Title>Reset the agent credential of {host.name}?</Dialog.Title>
+            </Dialog.Header>
+            <Dialog.Body>
+              <Card.Root variant="subtle" size="sm">
+                <Card.Body textStyle="sm">
+                  The agent's current credential stops working at once. Its next run enrolls again with the enrollment token in its
+                  configuration, if that token is still valid; otherwise re-run install.sh with a new token. Use this when a host was rebuilt or
+                  renamed. Findings and history are kept. If the host may be compromised, first revoke the enrollment token it used (Settings →
+                  Enrolled hosts shows which one), since its configuration holds that token.
+                </Card.Body>
+              </Card.Root>
+            </Dialog.Body>
+            <Dialog.Footer>
+              <Dialog.ActionTrigger asChild>
+                <Button variant="outline">Cancel</Button>
+              </Dialog.ActionTrigger>
+              <Dialog.ActionTrigger asChild>
+                <Button colorPalette="red" onClick={() => reset.mutate()} loading={reset.isPending}>
+                  Reset credential
+                </Button>
+              </Dialog.ActionTrigger>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Positioner>
+      </Portal>
+    </Dialog.Root>
+  )
+}
+
 function DeleteHost({ host }: { host: HostRow }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -355,8 +403,9 @@ function DeleteHost({ host }: { host: HostRow }) {
             <Dialog.Body>
               <Card.Root variant="subtle" size="sm">
                 <Card.Body textStyle="sm">
-                  This deletes the host with its targets, scan history and host-specific triage. If the agent is still installed, the host
-                  reappears on its next scan. Uninstall the agent first to remove it permanently.
+                  This deletes the host with its targets, scan history and host-specific triage. It also ends the host's agent credential. If the agent is
+                  still installed and its enrollment token is still valid, the host enrolls again and reappears on its next scan. Uninstall the
+                  agent first to remove it permanently.
                 </Card.Body>
               </Card.Root>
             </Dialog.Body>

@@ -92,22 +92,6 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) requireToken(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if !ok || tok == "" {
-			writeErr(w, http.StatusUnauthorized, "missing bearer token")
-			return
-		}
-		if _, valid := s.st.VerifyToken(r.Context(), strings.TrimSpace(tok)); !valid {
-			s.event(r, "warn", "auth", r.URL.Query().Get("host"), "", "rejected ingest request with invalid token from "+s.clientIP(r))
-			writeErr(w, http.StatusUnauthorized, "invalid token")
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !s.authEnabled() {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "auth_enabled": false})
