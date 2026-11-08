@@ -84,6 +84,15 @@ func (l *loginLimiter) fail(ip string) {
 	}
 }
 
+// failed reports whether the client has failures on record that it has not
+// lived down yet.
+func (l *loginLimiter) failed(ip string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	a, ok := l.hits[limitKey(ip)]
+	return ok && !a.stale(l.now())
+}
+
 func (l *loginLimiter) reset(ip string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -112,7 +121,9 @@ func (a *attempts) stale(now time.Time) bool {
 }
 
 // failBudget is a token bucket shared by all clients. It caps how fast the
-// one admin password can be guessed from many addresses at once.
+// one admin password can be guessed from many addresses at once. It only
+// holds back clients that have failed before, so a stranger hammering the
+// login cannot lock the owner out.
 type failBudget struct {
 	mu     sync.Mutex
 	size   float64

@@ -115,8 +115,9 @@ func TestFailBudget(t *testing.T) {
 	}
 }
 
-// Failures spread over many addresses still run out the shared budget, and
-// then even the right password waits.
+// Failures spread over many addresses still run out the shared budget. Then
+// addresses that failed before wait, while the right password from a clean
+// address still gets in: a stranger cannot lock the owner out.
 func TestLoginBudgetAcrossClients(t *testing.T) {
 	ts, st := newTestServerWith(t, func(c *Config) {
 		c.TrustedProxies, _ = ParseTrustedProxies("127.0.0.0/8, ::1")
@@ -137,16 +138,19 @@ func TestLoginBudgetAcrossClients(t *testing.T) {
 			t.Fatalf("failure %d: status %d, want 401", i+1, got)
 		}
 	}
-	if got := try("203.0.113.9", testPassword); got != http.StatusTooManyRequests {
-		t.Fatalf("login after the budget ran out: status %d, want 429", got)
+	if got := try("198.51.100.1", "wrong"); got != http.StatusTooManyRequests {
+		t.Fatalf("second failure after the budget ran out: status %d, want 429", got)
 	}
-	evs, err := st.ListEvents(t.Context(), store.EventFilter{Q: "logins are paused"}, store.Page{Size: 100})
+	if got := try("203.0.113.9", testPassword); got != http.StatusOK {
+		t.Fatalf("right password from a clean address after the budget ran out: status %d, want 200", got)
+	}
+	evs, err := st.ListEvents(t.Context(), store.EventFilter{Q: "are paused"}, store.Page{Size: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
 	paused := 0
 	for _, e := range evs.Items {
-		if strings.Contains(e.Message, "logins are paused") {
+		if strings.Contains(e.Message, "are paused") {
 			paused++
 		}
 	}
