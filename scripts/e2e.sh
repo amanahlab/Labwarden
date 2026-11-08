@@ -63,6 +63,16 @@ api -o /dev/null -X DELETE "$URL/api/v1/central-targets/$CID"
 api -o /dev/null -X DELETE "$URL/api/v1/hosts/$(host_id e2e-registry)"
 pass "central scan target and its host cleaned up"
 
+echo "== stale agent lock"
+# A run killed mid-scan (e.g. the container was stopped) leaves its lock behind.
+docker compose --profile testbed exec -T testbed-docker-agent \
+  sh -c 'mkdir -p /tmp/labwarden-agent.lock && echo 999999 >/tmp/labwarden-agent.lock/pid'
+docker compose --profile testbed exec -T testbed-docker-agent labwarden-agent 2>&1 | grep -q "removing stale lock" ||
+  fail "agent did not take over a stale lock"
+docker compose --profile testbed exec -T testbed-docker-agent test ! -e /tmp/labwarden-agent.lock ||
+  fail "agent left its lock behind"
+pass "agent recovers from a stale lock"
+
 echo "== retirement of a removed container"
 DID=$(host_id testbed-docker)
 run_agent() { docker compose --profile testbed exec -T testbed-docker-agent labwarden-agent >/dev/null 2>&1; }

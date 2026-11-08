@@ -250,10 +250,20 @@ scan() {
 
 main() {
 	if ! mkdir "$LOCK" 2>/dev/null; then
-		log warn "another labwarden-agent run is in progress; exiting"
-		exit 0
+		# A run killed without its trap (SIGKILL, power loss, a stopped
+		# container) leaves the lock behind; take it over if its owner is gone.
+		_pid=$(cat "$LOCK/pid" 2>/dev/null)
+		if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null &&
+			{ [ ! -r "/proc/$_pid/cmdline" ] || grep -q labwarden-agent "/proc/$_pid/cmdline"; }; then
+			log warn "another labwarden-agent run is in progress; exiting"
+			exit 0
+		fi
+		log warn "removing stale lock left by pid ${_pid:-unknown}"
+		rm -rf "$LOCK"
+		mkdir "$LOCK" 2>/dev/null || { log warn "another labwarden-agent run took the lock; exiting"; exit 0; }
 	fi
-	trap 'rm -rf "$WORK"; rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+	printf '%s\n' "$$" >"$LOCK/pid"
+	trap 'rm -rf "$WORK" "$LOCK"' EXIT INT TERM
 
 	KIND=${LABWARDEN_KIND:-}
 	if [ -z "$KIND" ]; then
