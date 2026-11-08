@@ -35,6 +35,9 @@ func env(key, def string) string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck())
+	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(log); err != nil {
 		log.Error("fatal", "err", err)
@@ -42,9 +45,29 @@ func main() {
 	}
 }
 
+// prepareTempDir makes sure TMPDIR exists. The image points it at <data>/tmp
+// (large downloads, read-only root), which outlives the container: what a
+// killed run left there is cleared. A TMPDIR anywhere else is never emptied.
+func prepareTempDir(dataDir string) error {
+	tmp := os.TempDir()
+	own, err := filepath.Abs(filepath.Join(dataDir, "tmp"))
+	if err != nil {
+		return err
+	}
+	if abs, err := filepath.Abs(tmp); err == nil && abs == own {
+		if err := os.RemoveAll(own); err != nil {
+			return err
+		}
+	}
+	return os.MkdirAll(tmp, 0o700)
+}
+
 func run(log *slog.Logger) error {
 	dataDir := env("LABWARDEN_DATA", "./data")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return err
+	}
+	if err := prepareTempDir(dataDir); err != nil {
 		return err
 	}
 	st, err := store.Open(filepath.Join(dataDir, "labwarden.db"))
@@ -137,9 +160,25 @@ func run(log *slog.Logger) error {
 		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       2 * time.Minute,
 	}
+	certFile, keyFile := os.Getenv("LABWARDEN_TLS_CERT"), os.Getenv("LABWARDEN_TLS_KEY")
+	if (certFile == "") != (keyFile == "") {
+		return errors.New("set both LABWARDEN_TLS_CERT and LABWARDEN_TLS_KEY, or neither")
+	}
+	if certFile != "" {
+		certs, err := newCertReloader(certFile, keyFile, log)
+		if err != nil {
+			return err
+		}
+		go certs.watch(ctx, time.Minute)
+		httpSrv.TLSConfig = tlsConfig(certs)
+	}
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("listening", "addr", httpSrv.Addr, "version", version)
+		log.Info("listening", "addr", httpSrv.Addr, "version", version, "tls", certFile != "")
+		if certFile != "" {
+			errc <- httpSrv.ListenAndServeTLS("", "")
+			return
+		}
 		errc <- httpSrv.ListenAndServe()
 	}()
 	select {

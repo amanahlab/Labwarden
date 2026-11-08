@@ -8,7 +8,14 @@ cd "$ROOT"
 [ -f .env ] || scripts/dev-env.sh
 set -a; . ./.env; set +a
 URL="http://localhost:${LABWARDEN_PORT:-8080}"
-JAR=$(mktemp) JAR2=$(mktemp); trap 'rm -f "$JAR" "$JAR2"' EXIT
+JAR=$(mktemp) JAR2=$(mktemp)
+TLS=labwarden-e2e-tls # throwaway TLS server and its certificate volume
+cleanup() {
+  rm -f "$JAR" "$JAR2"
+  docker rm -f -v "$TLS" >/dev/null 2>&1 || true
+  docker volume rm "$TLS" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass() { echo "ok   $*"; }
@@ -174,6 +181,66 @@ dbdirs=$(docker compose exec -T labwarden sh -c 'ls -A /data/grype-db')
 pass "server holds exactly one grype DB (no download leftovers)"
 code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$JAR" -X POST "$URL/api/v1/db/update")
 case "$code" in 202 | 409) pass "Update DB now accepted ($code)" ;; *) fail "Update DB now: status $code" ;; esac
+
+echo "== container hardening"
+for svc in labwarden testbed-docker-agent; do
+  docker inspect --format '{{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}} {{.HostConfig.SecurityOpt}}' "$(docker compose --profile testbed ps -q "$svc")" |
+    grep -q '^true \[ALL\] \[no-new-privileges:true\]$' || fail "$svc is not read-only, capability-free and no-new-privileges"
+done
+pass "dashboard and docker agent run read-only without capabilities"
+docker compose --profile testbed exec -T testbed-docker-agent test ! -e /var/run/docker.sock ||
+  fail "the docker agent has the Docker socket"
+code=$(docker compose --profile testbed exec -T testbed-docker-agent \
+  curl -sS -o /dev/null -w '%{http_code}' -X POST http://testbed-docker-proxy:2375/containers/create) || true
+[ "$code" = 403 ] || fail "socket proxy let a POST through: status $code, want 403"
+pass "docker agent scans through a read-only socket proxy"
+wait_for 120 "dashboard health check passes" sh -c \
+  '[ "$(docker inspect --format "{{.State.Health.Status}}" "$(docker compose ps -q labwarden)")" = healthy ]'
+
+echo "== native TLS"
+# A second dashboard on the compose network serves a self-signed certificate.
+# Its Grype DB download is pointed nowhere: this only checks the transport.
+docker volume create "$TLS" >/dev/null
+docker run --rm -v "$TLS:/c" alpine:3.22 sh -c '
+  apk add --no-cache -q openssl >/dev/null &&
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=labwarden-tls \
+    -addext subjectAltName=DNS:labwarden-tls -keyout /c/key.pem -out /c/cert.pem 2>/dev/null &&
+  chmod 644 /c/key.pem /c/cert.pem' || fail "could not make a test certificate"
+docker run -d --name "$TLS" --network labwarden_default --network-alias labwarden-tls \
+  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true \
+  -v "$TLS:/certs:ro" -e LABWARDEN_ADMIN_PASSWORD -e LABWARDEN_INGEST_TOKEN \
+  -e LABWARDEN_TLS_CERT=/certs/cert.pem -e LABWARDEN_TLS_KEY=/certs/key.pem \
+  -e GRYPE_DB_UPDATE_URL=http://127.0.0.1:9/ labwarden:latest >/dev/null || fail "could not start the TLS dashboard"
+wait_for 120 "TLS dashboard health check passes" sh -c \
+  '[ "$(docker inspect --format "{{.State.Health.Status}}" '"$TLS"')" = healthy ]'
+docker run --rm -v "$TLS:/c:ro" alpine:3.22 cat /c/cert.pem |
+  docker compose --profile testbed exec -T testbed-vm sh -c 'cat >/tmp/lw-ca.pem'
+docker compose --profile testbed exec -T testbed-vm curl -fsS -o /dev/null --cacert /tmp/lw-ca.pem https://labwarden-tls:8080/healthz ||
+  fail "https with the CA file failed"
+! docker compose --profile testbed exec -T testbed-vm curl -fsS -o /dev/null https://labwarden-tls:8080/healthz 2>/dev/null ||
+  fail "https without the CA file was trusted"
+pass "dashboard serves TLS that verifies only against its CA"
+# The agent, without the VM's agent.env, enrolls and uploads over TLS with LABWARDEN_CA_FILE.
+docker compose --profile testbed exec -T testbed-vm sh -c '
+  sed "s#^ENV_FILE=.*#ENV_FILE=/nonexistent#" /usr/local/bin/labwarden-agent >/tmp/agent-tls.sh
+  LABWARDEN_URL=https://labwarden-tls:8080 LABWARDEN_CA_FILE=/tmp/lw-ca.pem LABWARDEN_HOST=testbed-vm-tls \
+    LABWARDEN_STATE=/tmp/lw-tls-state LABWARDEN_SCAN_PATHS=/opt/app LABWARDEN_SCAN_DOCKER=false \
+    sh /tmp/agent-tls.sh >/tmp/tls-run.log 2>&1
+  grep -q "uploaded /opt/app" /tmp/tls-run.log && ! grep -q "plain http" /tmp/tls-run.log' ||
+  fail "agent could not enroll and upload over TLS with LABWARDEN_CA_FILE"
+pass "agent enrolls and uploads over TLS with LABWARDEN_CA_FILE"
+# The installer's downloads from the dashboard trust that CA too, and only with it.
+docker compose --profile testbed exec -T testbed-vm sh -c '
+  curl -fsS --cacert /tmp/lw-ca.pem -o /tmp/install-tls.sh https://labwarden-tls:8080/install.sh &&
+  LABWARDEN_INSTALL_SELFTEST=1 && . /tmp/install-tls.sh &&
+  LABWARDEN_CA_FILE=/tmp/lw-ca.pem fetch https://labwarden-tls:8080/agent/labwarden-agent.sh /tmp/agent-dl.sh &&
+  verify /tmp/agent-dl.sh "$AGENT_SHA256" &&
+  ! LABWARDEN_CA_FILE= fetch https://labwarden-tls:8080/agent/labwarden-agent.sh /tmp/agent-dl2.sh 2>/dev/null' ||
+  fail "installer could not download over TLS with LABWARDEN_CA_FILE"
+pass "installer downloads over TLS only with LABWARDEN_CA_FILE"
+docker compose --profile testbed exec -T testbed-vm grep -q "is plain http" /tmp/argv-run.log ||
+  fail "agent did not warn about a plain-http dashboard"
+pass "agent warns about a plain-http dashboard"
 
 echo "== logs"
 api "$URL/api/v1/events?source=agent&size=1" | jqr -e '.total > 0' >/dev/null || fail "no agent events"

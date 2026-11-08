@@ -32,11 +32,27 @@ import { Tooltip } from "@/components/ui/tooltip"
 
 const onError = (title: string) => (e: unknown) => toaster.create({ type: "error", title, description: (e as Error).message })
 
+// Plain http to anything but this machine: passwords, enrollment tokens and
+// host credentials cross the network readable by anyone on the path.
+const plainHTTP = window.location.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)
+
 export function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" description="Connect hosts, manage enrollment tokens and schedule central registry scans." />
       <Stack gap="6">
+        {plainHTTP && (
+          <Alert.Root status="warning">
+            <Alert.Indicator />
+            <Alert.Content>
+              <Alert.Title>This dashboard is served over plain HTTP</Alert.Title>
+              <Alert.Description>
+                Your password, enrollment tokens and the agents' credentials cross the network unencrypted. Set <Code size="sm">LABWARDEN_TLS_CERT</Code>{" "}
+                and <Code size="sm">LABWARDEN_TLS_KEY</Code>, or put the dashboard behind an HTTPS reverse proxy.
+              </Alert.Description>
+            </Alert.Content>
+          </Alert.Root>
+        )}
         <AgentSetup />
         <Grid templateColumns={{ base: "1fr", xl: "3fr 2fr" }} gap="6" alignItems="start">
           <Stack gap="6">
@@ -91,23 +107,38 @@ function AgentSetup() {
 echo "${sys.data?.install_sha256 || "<sha256>"}  lw-install.sh" | sha256sum -c
 sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh lw-install.sh`
   const docker = `docker run -d --name labwarden-agent --restart unless-stopped \\
+  --read-only --tmpfs /tmp --cap-drop ALL --cap-add DAC_OVERRIDE \\
+  --security-opt no-new-privileges:true \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro \\
   -v labwarden-agent-db:/var/lib/labwarden \\
   -e LABWARDEN_URL=${url} -e LABWARDEN_TOKEN=<token> \\
   -e LABWARDEN_HOST=$(hostname) -e LABWARDEN_GROUP=homelab \\
   labwarden-agent:latest`
   const compose = `services:
+  # Read-only Docker API: the agent never holds the socket itself.
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    restart: unless-stopped
+    environment: { CONTAINERS: "1", IMAGES: "1", POST: "0" }
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
   labwarden-agent:
     image: labwarden-agent:latest   # built from agent/Dockerfile in the LabWarden repo
     restart: unless-stopped
+    depends_on: [docker-proxy]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE]         # unpack container filesystems
+    security_opt: [no-new-privileges:true]
     environment:
       LABWARDEN_URL: ${url}
       LABWARDEN_TOKEN: <token>
       LABWARDEN_HOST: <host-name>      # name shown in the dashboard
       LABWARDEN_GROUP: homelab
       LABWARDEN_INTERVAL: "21600"    # seconds between scans
+      LABWARDEN_DOCKER_URL: tcp://docker-proxy:2375
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - labwarden-agent-db:/var/lib/labwarden
 volumes:
   labwarden-agent-db: {}`
@@ -134,7 +165,8 @@ volumes:
                 The checksum is of this dashboard's installer; the installer in turn checks Syft and the agent script before installing them.
                 It installs Syft, the agent script and a sandboxed systemd timer (every 6 hours, randomized by 15 minutes, catches up after downtime). Without
                 systemd it uses cron. The first scan starts right away. Options: <Code size="sm">LABWARDEN_SCAN_PATHS</Code>,{" "}
-                <Code size="sm">LABWARDEN_SCHEDULE</Code>, <Code size="sm">LABWARDEN_SCAN_DOCKER</Code>. Uninstall with{" "}
+                <Code size="sm">LABWARDEN_SCHEDULE</Code>, <Code size="sm">LABWARDEN_SCAN_DOCKER</Code>, <Code size="sm">LABWARDEN_CA_FILE</Code> (CA of a
+                self-signed dashboard certificate; pass <Code size="sm">--cacert</Code> to the download too). Uninstall with{" "}
                 <Code size="sm">sudo sh lw-install.sh --uninstall</Code>.
               </Text>
             </Step>
@@ -146,7 +178,8 @@ volumes:
         <Tabs.Content value="docker">
           <Stack gap="3">
             <Text textStyle="sm" color="fg.muted">
-              Scans the image of every running container through the Docker socket (read-only). Build the image once from the repository with{" "}
+              Scans the image of every running container through the Docker socket. The socket is root-equivalent even when mounted{" "}
+              <Code size="sm">:ro</Code>; the Compose tab puts a read-only socket proxy in between. Build the image once from the repository with{" "}
               <Code size="sm">docker build -t labwarden-agent agent/</Code>.
             </Text>
             <CodeBlock code={docker} />

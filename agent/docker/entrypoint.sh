@@ -8,6 +8,11 @@ trap 'exit 0' TERM INT
 if [ -d /var/lib/labwarden/grype-db ]; then
 	rm -rf /var/lib/labwarden/grype-db && echo "removed the old local grype DB (/var/lib/labwarden/grype-db)"
 fi
+# Nothing runs yet: clear what a killed run left in TMPDIR (image exports).
+case "${TMPDIR:-}" in
+/var/lib/labwarden/tmp) rm -rf "$TMPDIR" ;;
+esac
+(umask 077 && mkdir -p "${TMPDIR:-/tmp}")
 while :; do
 	/usr/local/bin/labwarden-agent || true
 	sleep "$interval" &

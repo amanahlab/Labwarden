@@ -1,10 +1,11 @@
 # LabWarden Docker agent: catalogs the images of running containers through the
 # Docker socket every LABWARDEN_INTERVAL seconds and pushes the SBOMs.
-# Bump SYFT_VERSION together with the server's GRYPE_VERSION.
+# Bump SYFT_VERSION (and its digest) together with the server's GRYPE_VERSION.
 ARG SYFT_VERSION=v1.57.0
-FROM anchore/syft:${SYFT_VERSION} AS syft
+ARG SYFT_DIGEST=sha256:3c70e6d5979364cefdc22b51617a78fd264574d3bd6b4f84a351204147025e2a
+FROM anchore/syft:${SYFT_VERSION}@${SYFT_DIGEST} AS syft
 
-FROM alpine:3.22
+FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
 RUN apk add --no-cache ca-certificates curl jq gzip tzdata
 COPY --from=syft /syft /usr/local/bin/syft
 COPY labwarden-agent.sh /usr/local/bin/labwarden-agent
@@ -14,6 +15,10 @@ ENV LABWARDEN_SCAN_PATHS="" \
     LABWARDEN_SCAN_DOCKER=true \
     LABWARDEN_KIND=docker \
     LABWARDEN_INTERVAL=21600 \
-    LABWARDEN_SPOOL=/var/lib/labwarden/spool
+    LABWARDEN_SPOOL=/var/lib/labwarden/spool \
+    TMPDIR=/var/lib/labwarden/tmp \
+    XDG_CACHE_HOME=/var/lib/labwarden/cache
+# Image exports and syft's layer extraction go to TMPDIR, on the state volume,
+# so the container can run with a read-only root filesystem.
 VOLUME /var/lib/labwarden
 ENTRYPOINT ["/usr/local/bin/entrypoint"]

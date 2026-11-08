@@ -76,7 +76,7 @@ Create an enrollment token in **Settings → Enrollment tokens**, then follow th
 
 The SHA-256 in Settings comes from the same dashboard as `install.sh`, so over plain http it catches a broken download, not an attacker on the network: serve the dashboard over https for that (see Security model).
 
-**Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and rebuild every Docker agent. Existing tokens keep working as enrollment tokens.
+**Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and rebuild every Docker agent. Existing tokens keep working as enrollment tokens. `install.sh` writes `agent.env` from the settings it is given, so pass `LABWARDEN_CA_FILE` and `LABWARDEN_DOCKER_URL` again whenever you re-run it.
 
 ```bash
 # Linux VM (systemd or cron): download, check against the SHA-256 shown in Settings, run
@@ -86,12 +86,15 @@ sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=<token> LABWARDEN_G
 # uninstall
 sudo sh lw-install.sh --uninstall
 
-# Docker host
+# Docker host (the Compose snippet in Settings adds a read-only socket proxy)
 docker build -t labwarden-agent agent/
 docker run -d --name labwarden-agent --restart unless-stopped \
+  --read-only --tmpfs /tmp --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges:true \
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v labwarden-agent-db:/var/lib/labwarden \
   -e LABWARDEN_URL=http://labwarden.lan:8080 -e LABWARDEN_TOKEN=<token> -e LABWARDEN_HOST=$(hostname) labwarden-agent
 ```
+
+With a self-signed dashboard certificate, download the installer with `curl --cacert ca.pem …` and pass `LABWARDEN_CA_FILE=ca.pem` to it; it keeps a copy in `/etc/labwarden/ca.pem`. Docker agents take `LABWARDEN_CA_FILE` with the file mounted in.
 
 Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 - `LABWARDEN_HOST`, `LABWARDEN_GROUP`
@@ -99,6 +102,8 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 - `LABWARDEN_EXCLUDES`
 - `LABWARDEN_SCAN_DOCKER` (`auto|true|false`)
 - `LABWARDEN_DOCKER_LABEL`
+- `LABWARDEN_DOCKER_URL` (`tcp://host:port` of a read-only Docker socket proxy, instead of the socket)
+- `LABWARDEN_CA_FILE` (PEM CA certificate to trust for an `https://` dashboard)
 - `LABWARDEN_INTERVAL`
 - `LABWARDEN_SCHEDULE` (systemd `OnCalendar`)
 - `LABWARDEN_CRON`
@@ -112,6 +117,7 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 | `LABWARDEN_INGEST_TOKEN` | | Optional bootstrap enrollment token (at least 16 characters, never expires). Imported once; revoking it in Settings sticks across restarts |
 | `LABWARDEN_DATA` | `/data` | SQLite database, job queue (`queue.db`), stored SBOMs, session key, Grype DB |
 | `LABWARDEN_ADDR` | `:8080` | |
+| `LABWARDEN_TLS_CERT`, `LABWARDEN_TLS_KEY` | | PEM certificate (with its chain) and key: serve HTTPS directly, TLS 1.2 or newer. A renewed pair is picked up within a minute, or at once on `SIGHUP`. Set both or neither |
 | `LABWARDEN_COOKIE_SECURE` | `false` | `true` marks the session cookie `Secure` (with the `__Host-` prefix). Automatic when the request arrives over TLS, when a trusted proxy sends `X-Forwarded-Proto: https`, or when it is for the host of an `https://` `LABWARDEN_PUBLIC_URL` |
 | `LABWARDEN_TRUSTED_PROXIES` | | Reverse proxies allowed to set `X-Forwarded-For` and `X-Forwarded-Proto`: IP addresses or CIDR ranges, comma-separated (e.g. `172.18.0.10`). List the proxy's own address, not its Docker network: a whole range such as `172.18.0.0/16` also covers Docker's gateway, which is where direct connections to a published port come from. Without it, the client address is the TCP peer, so login lockouts behind a proxy apply to the proxy as a whole |
 | `LABWARDEN_MAX_REPORT_MB` | `256` | Maximum upload size in MB; a gzipped upload may decompress to at most 4 times that |
@@ -130,6 +136,26 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 ### Alerts
 
 After each stored report, LabWarden compares the findings with the target's previous scan. It sends one message per report that lists the new findings at or above `LABWARDEN_NOTIFY_MIN_SEVERITY`, plus any new known-exploited ones. Each vulnerability appears once, KEV first, and the message shows at most 10. A target's first scan counts every finding as new. Vulnerabilities triaged as *ignored* or *false positive*, globally or for that host, do not alert. **Settings → System → Send test** checks the setup. A failed delivery shows up under **Logs**.
+
+## Security model
+
+Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+
+**Who can do what.**
+- **The admin** (one password) can do everything in the web UI. Sessions live on the server and can be ended from Settings. Logins are throttled per address and in total.
+- **An enrollment token** can only enroll new hosts, within its expiry and host limit. It cannot read anything or report for a host.
+- **A host credential** can only report for its own host: SBOMs, events and run status. It cannot read the dashboard. A stolen credential can feed false data for that one host until you reset it on the host's page; also revoke the token that enrolled it.
+- **The server never sends anything to agents.** Agents only push, so a compromised dashboard cannot run code on them. The installer is the exception: it runs as root, so download it, check its SHA-256 against Settings, then run it. It checks Syft against pinned checksums and the agent script against the checksum the dashboard put in it.
+
+**TLS.** Without TLS, the admin password, enrollment tokens, host credentials and SBOMs cross the network in clear text. Settings, the installer and the agents warn about this when the dashboard is not on the same machine. Either:
+- set `LABWARDEN_TLS_CERT` and `LABWARDEN_TLS_KEY`, which serve HTTPS directly and pick up renewed certificates; agents with a private CA use `LABWARDEN_CA_FILE`; or
+- put the dashboard behind an HTTPS reverse proxy, with `LABWARDEN_TRUSTED_PROXIES` set to the proxy's address (so login throttling sees real client addresses) and `LABWARDEN_PUBLIC_URL` set to the `https://` URL.
+
+**Docker.** Access to the Docker socket is root on that host, even when it is mounted `:ro`. Prefer a socket proxy that allows only `GET` on containers and images, such as `tecnativa/docker-socket-proxy` with `CONTAINERS=1 IMAGES=1 POST=0`, and point the agent at it with `LABWARDEN_DOCKER_URL` (see the Compose snippet in Settings). The shipped `docker-compose.yml` runs the dashboard and the testbed agent with a read-only root filesystem, no capabilities (the agent keeps `DAC_OVERRIDE` to unpack container filesystems) and `no-new-privileges`. The VM agent's systemd unit is sandboxed the same way.
+
+**Supply chain.** The images LabWarden ships and runs (the dashboard and agent images, their base and tool images, and the socket proxy) are pinned by tag and digest; the build-and-test containers in `scripts/` are pinned by tag. `scripts/test.sh` runs `govulncheck` and `npm audit` for production dependencies.
+
+**Upgrading to the hardened release** breaks compatibility: set an admin password of at least 12 characters (the server no longer starts without one), then re-install every agent (see Installing agents).
 
 ## Development
 
