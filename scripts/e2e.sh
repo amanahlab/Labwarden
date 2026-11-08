@@ -219,6 +219,15 @@ docker compose --profile testbed exec -T testbed-vm sh -c '
   grep -q "uploaded /opt/app" /tmp/tls-run.log && ! grep -q "plain http" /tmp/tls-run.log' ||
   fail "agent could not enroll and upload over TLS with LABWARDEN_CA_FILE"
 pass "agent enrolls and uploads over TLS with LABWARDEN_CA_FILE"
+# The installer's downloads from the dashboard trust that CA too, and only with it.
+docker compose --profile testbed exec -T testbed-vm sh -c '
+  curl -fsS --cacert /tmp/lw-ca.pem -o /tmp/install-tls.sh https://labwarden-tls:8080/install.sh &&
+  LABWARDEN_INSTALL_SELFTEST=1 && . /tmp/install-tls.sh &&
+  LABWARDEN_CA_FILE=/tmp/lw-ca.pem fetch https://labwarden-tls:8080/agent/labwarden-agent.sh /tmp/agent-dl.sh &&
+  verify /tmp/agent-dl.sh "$AGENT_SHA256" &&
+  ! LABWARDEN_CA_FILE= fetch https://labwarden-tls:8080/agent/labwarden-agent.sh /tmp/agent-dl2.sh 2>/dev/null' ||
+  fail "installer could not download over TLS with LABWARDEN_CA_FILE"
+pass "installer downloads over TLS only with LABWARDEN_CA_FILE"
 docker compose --profile testbed exec -T testbed-vm grep -q "is plain http" /tmp/argv-run.log ||
   fail "agent did not warn about a plain-http dashboard"
 pass "agent warns about a plain-http dashboard"

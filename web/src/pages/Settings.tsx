@@ -117,7 +117,7 @@ sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh lw-
   const compose = `services:
   # Read-only Docker API: the agent never holds the socket itself.
   docker-proxy:
-    image: tecnativa/docker-socket-proxy:v0.5.0
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     restart: unless-stopped
     environment: { CONTAINERS: "1", IMAGES: "1", POST: "0" }
     volumes:

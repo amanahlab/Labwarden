@@ -45,13 +45,29 @@ func main() {
 	}
 }
 
+// prepareTempDir makes sure TMPDIR exists. The image points it at <data>/tmp
+// (large downloads, read-only root), which outlives the container: what a
+// killed run left there is cleared. A TMPDIR anywhere else is never emptied.
+func prepareTempDir(dataDir string) error {
+	tmp := os.TempDir()
+	own, err := filepath.Abs(filepath.Join(dataDir, "tmp"))
+	if err != nil {
+		return err
+	}
+	if abs, err := filepath.Abs(tmp); err == nil && abs == own {
+		if err := os.RemoveAll(own); err != nil {
+			return err
+		}
+	}
+	return os.MkdirAll(tmp, 0o700)
+}
+
 func run(log *slog.Logger) error {
 	dataDir := env("LABWARDEN_DATA", "./data")
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
-	// The image points TMPDIR at the data volume (large downloads, read-only root).
-	if err := os.MkdirAll(os.TempDir(), 0o700); err != nil {
+	if err := prepareTempDir(dataDir); err != nil {
 		return err
 	}
 	st, err := store.Open(filepath.Join(dataDir, "labwarden.db"))

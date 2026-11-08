@@ -9,11 +9,12 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"io"
 	"log/slog"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -60,11 +61,30 @@ func servedCN(t *testing.T, r *certReloader) string {
 	return leaf.Subject.CommonName
 }
 
+// lockedBuf is a log sink the watcher goroutine and the test can share.
+type lockedBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) count(s string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Count(l.b.String(), s)
+}
+
 func TestCertReloaderPicksUpRenewedPair(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
 	writePair(t, certFile, keyFile, "old")
-	r, err := newCertReloader(certFile, keyFile, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	logs := &lockedBuf{}
+	r, err := newCertReloader(certFile, keyFile, slog.New(slog.NewTextHandler(logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,13 +95,17 @@ func TestCertReloaderPicksUpRenewedPair(t *testing.T) {
 	defer cancel()
 	go r.watch(ctx, 10*time.Millisecond)
 
-	// A broken pair is ignored; the old certificate keeps being served.
+	// A broken pair is ignored, and reported once rather than on every
+	// tick; the old certificate keeps being served.
 	if err := os.WriteFile(certFile, []byte("not a certificate"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	if cn := servedCN(t, r); cn != "old" {
 		t.Fatalf("after a broken write, serving %q", cn)
+	}
+	if n := logs.count("reload failed"); n != 1 {
+		t.Fatalf("broken pair reported %d times over 10 ticks, want 1", n)
 	}
 
 	writePair(t, certFile, keyFile, "new")
@@ -98,5 +122,38 @@ func TestCertReloaderRejectsMissingFiles(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := newCertReloader(filepath.Join(dir, "c"), filepath.Join(dir, "k"), slog.Default()); err == nil {
 		t.Fatal("missing files accepted")
+	}
+}
+
+func TestPrepareTempDirClearsOnlyItsOwn(t *testing.T) {
+	data := t.TempDir()
+	own := filepath.Join(data, "tmp")
+	if err := os.MkdirAll(own, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(own, "leftover"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", own)
+	if err := prepareTempDir(data); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(own, "leftover")); !os.IsNotExist(err) {
+		t.Fatalf("leftover in <data>/tmp survived: %v", err)
+	}
+	if _, err := os.Stat(own); err != nil {
+		t.Fatalf("<data>/tmp not recreated: %v", err)
+	}
+
+	other := t.TempDir()
+	if err := os.WriteFile(filepath.Join(other, "keep"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", other)
+	if err := prepareTempDir(data); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(other, "keep")); err != nil {
+		t.Fatalf("a TMPDIR outside the data directory was emptied: %v", err)
 	}
 }

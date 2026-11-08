@@ -45,15 +45,18 @@ func (r *certReloader) stampOf() string {
 	return s
 }
 
+// reload loads the pair. A pair that fails is remembered too, so the watcher
+// tries it again only once the files change (or on SIGHUP), not every tick.
 func (r *certReloader) reload() error {
 	stamp := r.stampOf()
 	c, err := tls.LoadX509KeyPair(r.certFile, r.keyFile)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stamp = stamp
 	if err != nil {
 		return fmt.Errorf("load TLS certificate: %w", err)
 	}
-	r.mu.Lock()
-	r.cert, r.stamp = &c, stamp
-	r.mu.Unlock()
+	r.cert = &c
 	return nil
 }
 

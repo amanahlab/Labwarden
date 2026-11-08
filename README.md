@@ -76,7 +76,7 @@ Create an enrollment token in **Settings → Enrollment tokens**, then follow th
 
 The SHA-256 in Settings comes from the same dashboard as `install.sh`, so over plain http it catches a broken download, not an attacker on the network: serve the dashboard over https for that (see Security model).
 
-**Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and rebuild every Docker agent. Existing tokens keep working as enrollment tokens.
+**Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and rebuild every Docker agent. Existing tokens keep working as enrollment tokens. `install.sh` writes `agent.env` from the settings it is given, so pass `LABWARDEN_CA_FILE` and `LABWARDEN_DOCKER_URL` again whenever you re-run it.
 
 ```bash
 # Linux VM (systemd or cron): download, check against the SHA-256 shown in Settings, run
@@ -153,7 +153,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 **Docker.** Access to the Docker socket is root on that host, even when it is mounted `:ro`. Prefer a socket proxy that allows only `GET` on containers and images, such as `tecnativa/docker-socket-proxy` with `CONTAINERS=1 IMAGES=1 POST=0`, and point the agent at it with `LABWARDEN_DOCKER_URL` (see the Compose snippet in Settings). The shipped `docker-compose.yml` runs the dashboard and the testbed agent with a read-only root filesystem, no capabilities (the agent keeps `DAC_OVERRIDE` to unpack container filesystems) and `no-new-privileges`. The VM agent's systemd unit is sandboxed the same way.
 
-**Supply chain.** Base and tool images are pinned by tag and digest. `scripts/test.sh` runs `govulncheck` and `npm audit` for production dependencies.
+**Supply chain.** The images LabWarden ships and runs (the dashboard and agent images, their base and tool images, and the socket proxy) are pinned by tag and digest; the build-and-test containers in `scripts/` are pinned by tag. `scripts/test.sh` runs `govulncheck` and `npm audit` for production dependencies.
 
 **Upgrading to the hardened release** breaks compatibility: set an admin password of at least 12 characters (the server no longer starts without one), then re-install every agent (see Installing agents).
 
