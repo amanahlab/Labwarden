@@ -42,13 +42,15 @@ type Server struct {
 	webFS   fs.FS // built SPA (may be empty)
 	agentFS fs.FS
 	limiter *loginLimiter
+	budget  *failBudget // failed logins from all clients together
 }
 
 func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *notify.Notifier, log *slog.Logger, webFS, agentFS fs.FS) *Server {
 	if cfg.MaxReportMB <= 0 {
 		cfg.MaxReportMB = 256
 	}
-	return &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agentFS: agentFS, limiter: newLoginLimiter()}
+	return &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agentFS: agentFS,
+		limiter: newLoginLimiter(), budget: newFailBudget(loginBudget, loginBudgetWindow)}
 }
 
 func (s *Server) Handler() http.Handler {

@@ -5,10 +5,10 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/amanahlab/labwarden/server/internal/store"
@@ -17,6 +17,9 @@ import (
 const (
 	sessionCookie = "labwarden_session"
 	sessionTTL    = 7 * 24 * time.Hour
+
+	loginBudget       = 30 // failed logins from all clients together per window
+	loginBudgetWindow = 10 * time.Minute
 )
 
 func (s *Server) authEnabled() bool { return s.cfg.AdminPassword != "" }
@@ -86,7 +89,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := s.clientIP(r)
-	if wait := s.limiter.blocked(ip); wait > 0 {
+	if wait := max(s.limiter.blocked(ip), s.budget.wait()); wait > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		writeErr(w, http.StatusTooManyRequests, "too many attempts, try again later")
 		return
@@ -103,6 +106,9 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if subtle.ConstantTimeCompare(a[:], b[:]) != 1 {
 		s.limiter.fail(ip)
 		s.event(r, "warn", "auth", "", "", "failed admin login from "+ip)
+		if s.budget.spend() {
+			s.event(r, "warn", "auth", "", "", fmt.Sprintf("more than %d failed admin logins in %s from all addresses together: logins are paused until the rate drops", loginBudget, loginBudgetWindow))
+		}
 		writeErr(w, http.StatusUnauthorized, "invalid password")
 		return
 	}
@@ -133,49 +139,4 @@ func (s *Server) event(r *http.Request, level, source, host, runID, msg string) 
 	if err := s.st.AddEvent(r.Context(), store.Event{Level: level, Source: source, Host: host, RunID: runID, Message: msg}); err != nil {
 		s.log.Error("add event", "err", err)
 	}
-}
-
-// loginLimiter locks an IP out for a while after repeated failures.
-type loginLimiter struct {
-	mu   sync.Mutex
-	hits map[string]*attempts
-}
-
-type attempts struct {
-	n     int
-	until time.Time
-}
-
-func newLoginLimiter() *loginLimiter { return &loginLimiter{hits: map[string]*attempts{}} }
-
-func (l *loginLimiter) blocked(ip string) time.Duration {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if a, ok := l.hits[ip]; ok && time.Now().Before(a.until) {
-		return time.Until(a.until)
-	}
-	return 0
-}
-
-func (l *loginLimiter) fail(ip string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	a, ok := l.hits[ip]
-	if !ok {
-		if len(l.hits) > 10000 {
-			l.hits = map[string]*attempts{}
-		}
-		a = &attempts{}
-		l.hits[ip] = a
-	}
-	a.n++
-	if a.n >= 5 {
-		a.until = time.Now().Add(time.Duration(a.n-4) * 30 * time.Second)
-	}
-}
-
-func (l *loginLimiter) reset(ip string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	delete(l.hits, ip)
 }
