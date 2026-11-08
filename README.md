@@ -123,3 +123,7 @@ scripts/npm.sh …    # any npm command for web/
 ```
 
 > `testbed/` pins deliberately vulnerable software. Never reuse those images or versions anywhere else.
+
+## License
+
+LabWarden is licensed under the [GNU Affero General Public License v3.0](LICENSE).
