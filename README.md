@@ -107,6 +107,7 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 | `LABWARDEN_DATA` | `/data` | SQLite database, job queue (`queue.db`), stored SBOMs, session key, Grype DB |
 | `LABWARDEN_ADDR` | `:8080` | |
 | `LABWARDEN_COOKIE_SECURE` | `false` | Set to `true` behind HTTPS |
+| `LABWARDEN_TRUSTED_PROXIES` | | Reverse proxies allowed to set `X-Forwarded-For` and `X-Forwarded-Proto`: IP addresses or CIDR ranges, comma-separated (e.g. `172.18.0.0/16`). Without it, the client address is the TCP peer, so login lockouts behind a proxy apply to the proxy as a whole |
 | `LABWARDEN_MAX_REPORT_MB` | `256` | Maximum upload size in MB; a gzipped upload may decompress to at most 4 times that |
 | `LABWARDEN_SCAN_WORKERS` | `2` | Grype processes run at once (about 115 MB each) |
 | `LABWARDEN_QUEUE_MAX` | `1000` | Queued jobs above which SBOM uploads get `503` and stay in the agent's spool |

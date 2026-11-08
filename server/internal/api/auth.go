@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -73,7 +72,7 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 			return
 		}
 		if _, valid := s.st.VerifyToken(r.Context(), strings.TrimSpace(tok)); !valid {
-			s.event(r, "warn", "auth", r.URL.Query().Get("host"), "", "rejected ingest request with invalid token from "+clientIP(r))
+			s.event(r, "warn", "auth", r.URL.Query().Get("host"), "", "rejected ingest request with invalid token from "+s.clientIP(r))
 			writeErr(w, http.StatusUnauthorized, "invalid token")
 			return
 		}
@@ -86,7 +85,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "auth_enabled": false})
 		return
 	}
-	ip := clientIP(r)
+	ip := s.clientIP(r)
 	if wait := s.limiter.blocked(ip); wait > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		writeErr(w, http.StatusTooManyRequests, "too many attempts, try again later")
@@ -134,14 +133,6 @@ func (s *Server) event(r *http.Request, level, source, host, runID, msg string) 
 	if err := s.st.AddEvent(r.Context(), store.Event{Level: level, Source: source, Host: host, RunID: runID, Message: msg}); err != nil {
 		s.log.Error("add event", "err", err)
 	}
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 // loginLimiter locks an IP out for a while after repeated failures.

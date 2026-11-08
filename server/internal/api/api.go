@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +27,9 @@ type Config struct {
 	SessionKey    []byte
 	CookieSecure  bool
 	MaxReportMB   int64
+	// TrustedProxies may set X-Forwarded-For and X-Forwarded-Proto; requests
+	// from anywhere else are taken at their TCP address.
+	TrustedProxies []netip.Prefix
 }
 
 type Server struct {
@@ -49,7 +53,7 @@ func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *no
 
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP, middleware.Recoverer, s.accessLog, securityHeaders)
+	r.Use(middleware.Recoverer, s.accessLog, securityHeaders)
 
 	r.Get("/healthz", s.health)
 	r.Get("/install.sh", s.agentFile("install.sh"))
@@ -249,6 +253,6 @@ func (s *Server) accessLog(next http.Handler) http.Handler {
 			return
 		}
 		s.log.Info("http", "method", r.Method, "path", r.URL.Path, "status", ww.Status(),
-			"bytes_in", r.ContentLength, "dur_ms", time.Since(start).Milliseconds(), "ip", r.RemoteAddr)
+			"bytes_in", r.ContentLength, "dur_ms", time.Since(start).Milliseconds(), "ip", s.clientIP(r))
 	})
 }

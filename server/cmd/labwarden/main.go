@@ -69,6 +69,10 @@ func run(log *slog.Logger) error {
 	if adminPw == "" {
 		log.Warn("LABWARDEN_ADMIN_PASSWORD is not set: the dashboard is open to anyone who can reach it")
 	}
+	proxies, err := api.ParseTrustedProxies(os.Getenv("LABWARDEN_TRUSTED_PROXIES"))
+	if err != nil {
+		return err
+	}
 	maxMB, _ := strconv.ParseInt(env("LABWARDEN_MAX_REPORT_MB", "256"), 10, 64)
 
 	nt, err := notify.New(notify.Config{
@@ -118,7 +122,7 @@ func run(log *slog.Logger) error {
 
 	srv := api.New(api.Config{
 		Version: version, AdminPassword: adminPw, SessionKey: key,
-		CookieSecure: env("LABWARDEN_COOKIE_SECURE", "false") == "true", MaxReportMB: maxMB,
+		CookieSecure: env("LABWARDEN_COOKIE_SECURE", "false") == "true", MaxReportMB: maxMB, TrustedProxies: proxies,
 	}, st, sc, q, nt, log, web.FS(), agent.FS)
 
 	_ = st.AddEvent(ctx, store.Event{Level: "info", Source: "system", Message: "LabWarden " + version + " started"})
