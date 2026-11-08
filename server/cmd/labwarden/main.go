@@ -50,6 +50,10 @@ func run(log *slog.Logger) error {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return err
 	}
+	// The image points TMPDIR at the data volume (large downloads, read-only root).
+	if err := os.MkdirAll(os.TempDir(), 0o700); err != nil {
+		return err
+	}
 	st, err := store.Open(filepath.Join(dataDir, "labwarden.db"))
 	if err != nil {
 		return err

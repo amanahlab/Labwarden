@@ -9,6 +9,11 @@ services:
         VERSION: ${LABWARDEN_VERSION:-dev}
     image: labwarden:latest
     restart: unless-stopped
+    # Writes only to /data (TMPDIR included); needs no capabilities.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:size=64m]
     ports:
       - "${LABWARDEN_PORT:-8080}:8080"
     env_file:
@@ -44,21 +49,40 @@ services:
     labels:
       labwarden.scan: "true"
 
+  # Read-only Docker API for the agent: GET/HEAD on containers and images
+  # only, so the agent never holds the root-equivalent socket itself.
+  testbed-docker-proxy:
+    profiles: [testbed]
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+    environment:
+      CONTAINERS: "1"
+      IMAGES: "1"
+      POST: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   testbed-docker-agent:
     profiles: [testbed]
     build: agent
     image: labwarden-agent:latest
     hostname: testbed-docker
-    depends_on: [labwarden, testbed-workload]
+    depends_on: [labwarden, testbed-workload, testbed-docker-proxy]
+    # Root only to own its state volume. CAP_DAC_OVERRIDE lets it unpack (and
+    # remove) a container filesystem with read-only directories.
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:size=64m]
     environment:
       LABWARDEN_URL: http://labwarden:8080
       LABWARDEN_TOKEN: ${LABWARDEN_INGEST_TOKEN:?run scripts/dev-env.sh first}
       LABWARDEN_HOST: testbed-docker
       LABWARDEN_GROUP: testbed
+      LABWARDEN_DOCKER_URL: tcp://testbed-docker-proxy:2375
       LABWARDEN_DOCKER_LABEL: labwarden.scan=true
       LABWARDEN_INTERVAL: "900"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
       - testbed-docker-state:/var/lib/labwarden
 
 volumes:
