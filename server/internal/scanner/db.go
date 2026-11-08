@@ -70,13 +70,14 @@ func (s *Scanner) refreshDBStatus(ctx context.Context) {
 	s.status.DBBuilt, s.status.DBSchema = ds.Built, ds.SchemaVersion
 }
 
-// updateDB downloads a new DB if one is available and swaps it in. Only one
+// UpdateDB downloads a new DB if one is available and swaps it in. Only one
 // runs at a time; a second call while one is running returns at once.
-func (s *Scanner) updateDB(ctx context.Context) {
+func (s *Scanner) UpdateDB(ctx context.Context) error {
 	if !s.Status().Available || !s.updating.CompareAndSwap(false, true) {
-		return
+		return nil
 	}
 	defer s.updating.Store(false)
+	s.refreshDBStatus(ctx) // decides between checking for an update and a first download
 	built, err := s.downloadDB(ctx)
 	s.mu.Lock()
 	s.status.DBChecked = time.Now().UTC().Format(time.RFC3339)
@@ -87,12 +88,13 @@ func (s *Scanner) updateDB(ctx context.Context) {
 	s.mu.Unlock()
 	if err != nil {
 		s.event(ctx, "error", "", "grype DB update failed: "+trim(err.Error(), 1000))
-		return
+		return err
 	}
 	s.refreshDBStatus(ctx)
 	if built != "" {
 		s.event(ctx, "info", "", "grype vulnerability DB updated (built "+built+")")
 	}
+	return nil
 }
 
 // downloadDB returns the new DB's build date, or "" when the live DB is current.
@@ -108,7 +110,7 @@ func (s *Scanner) downloadDB(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	if !s.hasDB() {
+	if !s.HasDB() {
 		s.log.Info("no grype vulnerability DB yet; downloading", "dir", s.dbDir)
 	} else {
 		var chk struct {
@@ -185,7 +187,8 @@ func (s *Scanner) swapDB(ctx context.Context, staging string) error {
 	return nil
 }
 
-func (s *Scanner) hasDB() bool {
+// HasDB reports whether a vulnerability DB is ready for scans.
+func (s *Scanner) HasDB() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.status.DBBuilt != ""

@@ -408,7 +408,21 @@ function SystemPanel() {
           </DataList.Item>
           <DataList.Item>
             <DataList.ItemLabel>Queue</DataList.ItemLabel>
-            <DataList.ItemValue>{s.scanner.running ? `scanning ${s.scanner.running}, ${s.scanner.queued} queued` : s.scanner.queued ? `${s.scanner.queued} queued` : "idle"}</DataList.ItemValue>
+            <DataList.ItemValue>
+              <Stack gap="0">
+                <Text>
+                  {s.queue.running || s.queue.queued
+                    ? `${s.queue.running} running, ${s.queue.queued} queued`
+                    : "idle"}
+                  {s.scanner.running && ` · scanning ${s.scanner.running}`}
+                </Text>
+                {s.queue.failed_24h > 0 && (
+                  <Text textStyle="xs" color="fg.error">
+                    {s.queue.failed_24h} failed in the last 24 hours (see Logs)
+                  </Text>
+                )}
+              </Stack>
+            </DataList.ItemValue>
           </DataList.Item>
           <DataList.Item>
             <DataList.ItemLabel>Max report size</DataList.ItemLabel>

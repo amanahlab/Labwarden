@@ -326,7 +326,9 @@ func (s *Server) createCentral(w http.ResponseWriter, r *http.Request) {
 		s.storeErr(w, r, err)
 		return
 	}
-	s.scan.Enqueue(c.ID)
+	if _, err := s.jobs.EnqueueCentral(r.Context(), c.ID); err != nil {
+		s.log.Error("queue central scan", "id", c.ID, "err", err) // the scheduler queues it within a minute
+	}
 	writeJSON(w, http.StatusCreated, c)
 }
 
@@ -373,18 +375,29 @@ func (s *Server) scanCentral(w http.ResponseWriter, r *http.Request) {
 		s.storeErr(w, r, err)
 		return
 	}
-	if !s.scan.Enqueue(id) {
-		writeErr(w, http.StatusConflict, "scan queue is full or already contains this target")
+	queued, err := s.jobs.EnqueueCentral(r.Context(), id)
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
+	if !queued {
+		writeErr(w, http.StatusConflict, "a scan of this target is already queued or running")
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
 }
 
 func (s *Server) system(w http.ResponseWriter, r *http.Request) {
+	queue, err := s.jobs.Stats(r.Context())
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"version":       s.cfg.Version,
 		"auth_enabled":  s.authEnabled(),
 		"scanner":       s.scan.Status(),
+		"queue":         queue,
 		"max_report_mb": s.cfg.MaxReportMB,
 		"notify":        s.notify.Status(),
 	})

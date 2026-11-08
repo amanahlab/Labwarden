@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/notify"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
@@ -31,6 +32,7 @@ type Server struct {
 	cfg     Config
 	st      *store.Store
 	scan    *scanner.Scanner
+	jobs    *jobs.Queue
 	notify  *notify.Notifier
 	log     *slog.Logger
 	webFS   fs.FS // built SPA (may be empty)
@@ -38,11 +40,11 @@ type Server struct {
 	limiter *loginLimiter
 }
 
-func New(cfg Config, st *store.Store, sc *scanner.Scanner, nt *notify.Notifier, log *slog.Logger, webFS, agentFS fs.FS) *Server {
+func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *notify.Notifier, log *slog.Logger, webFS, agentFS fs.FS) *Server {
 	if cfg.MaxReportMB <= 0 {
 		cfg.MaxReportMB = 256
 	}
-	return &Server{cfg: cfg, st: st, scan: sc, notify: nt, log: log, webFS: webFS, agentFS: agentFS, limiter: newLoginLimiter()}
+	return &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agentFS: agentFS, limiter: newLoginLimiter()}
 }
 
 func (s *Server) Handler() http.Handler {

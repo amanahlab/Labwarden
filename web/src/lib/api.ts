@@ -215,8 +215,8 @@ export interface SystemInfo {
     db_checked: string
     db_error?: string
     running?: string
-    queued: number
   }
+  queue: { queued: number; running: number; failed_24h: number }
 }
 
 export interface Me {

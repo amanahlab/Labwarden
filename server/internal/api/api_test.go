@@ -17,7 +17,9 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
+	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/notify"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
@@ -45,8 +47,14 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sc := scanner.New("grype-not-installed", st, log)
+	q, err := jobs.Open(context.Background(), jobs.Config{Path: filepath.Join(t.TempDir(), "queue.db"), DBUpdateEvery: time.Hour}, st, sc, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { q.Stop(context.Background()) })
 	srv := New(Config{Version: "test", AdminPassword: testPassword, SessionKey: bytes.Repeat([]byte("k"), 32)},
-		st, scanner.New("grype-not-installed", st, log), nt, log, webFS, agentFS)
+		st, sc, q, nt, log, webFS, agentFS)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, st

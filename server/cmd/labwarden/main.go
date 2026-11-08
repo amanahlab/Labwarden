@@ -17,6 +17,7 @@ import (
 	"github.com/amanahlab/labwarden/agent"
 	"github.com/amanahlab/labwarden/server/internal/api"
 	"github.com/amanahlab/labwarden/server/internal/notify"
+	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
 	"github.com/amanahlab/labwarden/web"
@@ -81,13 +82,33 @@ func run(log *slog.Logger) error {
 	st.OnIngest(nt.Ingested)
 
 	sc := scanner.New(env("LABWARDEN_GRYPE_BIN", "grype"), st, log)
-	go sc.Run(ctx, env("LABWARDEN_SCHEDULER", "true") == "true", 6*time.Hour)
+	sc.Init(ctx)
+	q, err := jobs.Open(ctx, jobs.Config{
+		Path:          filepath.Join(dataDir, "queue.db"),
+		ScanWorkers:   2,
+		Scheduler:     env("LABWARDEN_SCHEDULER", "true") == "true",
+		DBUpdateEvery: 6 * time.Hour,
+	}, st, sc, log)
+	if err != nil {
+		return err
+	}
+	if err := q.Start(ctx); err != nil {
+		return err
+	}
+	defer func() {
+		// Running scans get the grace period, then are cancelled and re-run after the next start.
+		sctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		if err := q.Stop(sctx); err != nil {
+			log.Error("stop jobs", "err", err)
+		}
+	}()
 	go housekeeping(ctx, st, log)
 
 	srv := api.New(api.Config{
 		Version: version, AdminPassword: adminPw, SessionKey: key,
 		CookieSecure: env("LABWARDEN_COOKIE_SECURE", "false") == "true", MaxReportMB: maxMB,
-	}, st, sc, nt, log, web.FS(), agent.FS)
+	}, st, sc, q, nt, log, web.FS(), agent.FS)
 
 	_ = st.AddEvent(ctx, store.Event{Level: "info", Source: "system", Message: "LabWarden " + version + " started"})
 	httpSrv := &http.Server{

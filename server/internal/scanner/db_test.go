@@ -127,7 +127,7 @@ func TestUpdateDBStagesSwapsAndCleansUp(t *testing.T) {
 	}
 	f.write("available", "true")
 
-	f.s.updateDB(context.Background())
+	f.s.UpdateDB(context.Background())
 
 	if got := f.live(); got != "2026-02-02T00:00:00Z" {
 		t.Fatalf("live DB = %q, want the new one", got)
@@ -159,7 +159,7 @@ func TestUpdateDBStagesSwapsAndCleansUp(t *testing.T) {
 
 func TestUpdateDBSkipsDownloadWhenCurrent(t *testing.T) {
 	f := newFake(t, "2026-01-01T00:00:00Z")
-	f.s.updateDB(context.Background())
+	f.s.UpdateDB(context.Background())
 	for _, c := range f.calls() {
 		if strings.HasSuffix(c, " db update") {
 			t.Fatalf("downloaded although the DB is current: %q", c)
@@ -172,7 +172,7 @@ func TestUpdateDBSkipsDownloadWhenCurrent(t *testing.T) {
 
 func TestUpdateDBDownloadsWhenMissing(t *testing.T) {
 	f := newFake(t, "")
-	f.s.updateDB(context.Background())
+	f.s.UpdateDB(context.Background())
 	if f.live() != "2026-02-02T00:00:00Z" || f.s.Status().DBBuilt == "" {
 		t.Fatal("DB not downloaded on first start")
 	}
@@ -185,7 +185,7 @@ func TestUpdateDBRunsOneAtATime(t *testing.T) {
 	f := newFake(t, "2026-01-01T00:00:00Z")
 	f.write("available", "true")
 	f.s.updating.Store(true) // another update is running
-	f.s.updateDB(context.Background())
+	f.s.UpdateDB(context.Background())
 	if f.live() != "2026-01-01T00:00:00Z" {
 		t.Fatal("a second update ran concurrently")
 	}

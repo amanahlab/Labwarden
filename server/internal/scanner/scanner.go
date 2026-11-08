@@ -1,10 +1,12 @@
-// Package scanner runs Grype on the server: scheduled registry-image scans
-// ("central targets"), SBOMs uploaded by agents, and DB updates.
+// Package scanner runs Grype on the server: registry-image scans ("central
+// targets"), SBOMs uploaded by agents, and DB updates. Package jobs decides
+// when each runs.
 package scanner
 
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,16 +28,14 @@ type Scanner struct {
 	st      *store.Store
 	log     *slog.Logger
 	timeout time.Duration
-	queue   chan int64
 	sem     chan struct{} // bounds concurrent grype processes
 
 	dbDir    string       // grype's cache dir; see db.go
 	dbLock   sync.RWMutex // scans read-lock; swapping in a new DB write-locks
 	updating atomic.Bool  // a DB update is running
 
-	mu      sync.Mutex
-	pending map[int64]bool
-	status  Status
+	mu     sync.Mutex
+	status Status
 }
 
 type Status struct {
@@ -46,100 +46,43 @@ type Status struct {
 	DBChecked    string `json:"db_checked"`
 	DBError      string `json:"db_error,omitempty"`
 	Running      string `json:"running,omitempty"`
-	Queued       int    `json:"queued"`
 }
 
 func New(bin string, st *store.Store, log *slog.Logger) *Scanner {
 	return &Scanner{bin: bin, st: st, log: log, timeout: 20 * time.Minute, dbDir: grypeDBDir(),
-		queue: make(chan int64, 256), sem: make(chan struct{}, 2), pending: map[int64]bool{}}
+		sem: make(chan struct{}, 2)}
 }
 
 func (s *Scanner) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st := s.status
-	st.Queued = len(s.pending)
-	return st
+	return s.status
 }
 
-// Enqueue schedules a central target scan; false if already queued or full.
-func (s *Scanner) Enqueue(id int64) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.pending[id] {
-		return false
-	}
-	select {
-	case s.queue <- id:
-		s.pending[id] = true
-		return true
-	default:
-		return false
-	}
-}
-
-// Run drives the worker, scheduler and DB updates until ctx ends.
-func (s *Scanner) Run(ctx context.Context, schedule bool, dbUpdateEvery time.Duration) {
+// Init finds the grype binary. The DB on disk is found by the first UpdateDB:
+// reading its status cold takes about 20 seconds, too long to hold up startup.
+func (s *Scanner) Init(ctx context.Context) {
 	s.refreshVersion(ctx)
-	s.refreshDBStatus(ctx)
-	go s.worker(ctx)
-	go func() {
-		s.updateDB(ctx)
-		t := time.NewTicker(dbUpdateEvery)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				s.updateDB(ctx)
-			}
-		}
-	}()
-	if !schedule {
-		return
-	}
-	t := time.NewTicker(time.Minute)
-	defer t.Stop()
-	for {
-		due, err := s.st.DueCentralTargets(ctx)
-		if err != nil && ctx.Err() == nil {
-			s.log.Error("scheduler", "err", err)
-		}
-		for _, c := range due {
-			s.Enqueue(c.ID)
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
 }
 
-func (s *Scanner) worker(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case id := <-s.queue:
-			s.scanCentral(ctx, id)
-			s.mu.Lock()
-			delete(s.pending, id)
-			s.status.Running = ""
-			s.mu.Unlock()
-		}
-	}
-}
-
-func (s *Scanner) scanCentral(ctx context.Context, id int64) {
+// ScanCentral scans a central target and records the outcome; a target
+// deleted since it was queued is skipped.
+func (s *Scanner) ScanCentral(ctx context.Context, id int64) error {
 	c, err := s.st.GetCentralTarget(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
 	if err != nil {
-		return // deleted while queued
+		return err
 	}
 	s.mu.Lock()
 	s.status.Running = c.Ref
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.status.Running = ""
+		s.mu.Unlock()
+	}()
 	s.event(ctx, "info", c.HostName, "central scan started: "+c.Ref)
 	start := time.Now()
 	rep, err := s.grype(ctx, "registry:"+c.Ref)
@@ -153,12 +96,13 @@ func (s *Scanner) scanCentral(ctx context.Context, id int64) {
 			_, _ = s.st.CompleteRun(ctx, meta, "ok", nil)
 			s.event(ctx, "info", c.HostName, fmt.Sprintf("central scan of %s finished in %s: %d findings (%d new, %d fixed)",
 				c.Ref, time.Since(start).Round(time.Second), res.Findings, res.New, res.Fixed))
-			return
+			return nil
 		}
 	}
 	_ = s.st.MarkCentralRun(ctx, id, "error: "+trim(err.Error(), 300))
 	_, _ = s.st.CompleteRun(ctx, meta, "error", nil)
 	s.event(ctx, "error", c.HostName, "central scan of "+c.Ref+" failed: "+trim(err.Error(), 1500))
+	return err
 }
 
 // ScanSBOM scans an uploaded Syft SBOM and stores the result.
@@ -197,7 +141,7 @@ func (s *Scanner) grype(ctx context.Context, source string) (*grype.Report, erro
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	if !s.hasDB() {
+	if !s.HasDB() {
 		return nil, errors.New("the vulnerability DB has not been downloaded yet; try again later")
 	}
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
