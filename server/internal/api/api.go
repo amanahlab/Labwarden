@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,10 @@ type Config struct {
 	// TrustedProxies may set X-Forwarded-For and X-Forwarded-Proto; requests
 	// from anywhere else are taken at their TCP address.
 	TrustedProxies []netip.Prefix
+	// PublicURL is the dashboard's address (LABWARDEN_PUBLIC_URL). Browsers
+	// on it pass the cross-origin check even when a proxy rewrites Host, and
+	// an https one marks the session cookie Secure on requests for its host.
+	PublicURL string
 }
 
 type Server struct {
@@ -44,20 +49,27 @@ type Server struct {
 	limiter *loginLimiter
 	budget  *failBudget // failed logins from all clients together
 	pwFP    string      // see passwordFingerprint
+	public  *url.URL    // cfg.PublicURL, nil when unset or unusable
 }
 
 func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *notify.Notifier, log *slog.Logger, webFS, agentFS fs.FS) *Server {
 	if cfg.MaxReportMB <= 0 {
 		cfg.MaxReportMB = 256
 	}
-	return &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agentFS: agentFS,
+	s := &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agentFS: agentFS,
 		limiter: newLoginLimiter(), budget: newFailBudget(loginBudget, loginBudgetWindow),
 		pwFP: passwordFingerprint(cfg.SessionKey, cfg.AdminPassword)}
+	if u, err := url.Parse(strings.TrimSpace(cfg.PublicURL)); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
+		s.public = u
+	} else if cfg.PublicURL != "" {
+		log.Warn("LABWARDEN_PUBLIC_URL is not an http(s) URL; ignoring it for origin and cookie checks")
+	}
+	return s
 }
 
 func (s *Server) Handler() http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Recoverer, s.accessLog, s.securityHeaders, crossOriginProtection().Handler)
+	r.Use(middleware.Recoverer, s.accessLog, s.securityHeaders, s.crossOriginProtection().Handler)
 
 	r.Get("/healthz", s.health)
 	r.Get("/install.sh", s.agentFile("install.sh"))
@@ -241,8 +253,13 @@ func pageFrom(r *http.Request) store.Page {
 // crossOriginProtection refuses state-changing requests that a browser
 // sends from another site (CSRF), including the login form. Agents and
 // other non-browser clients send neither Sec-Fetch-Site nor Origin and pass.
-func crossOriginProtection() *http.CrossOriginProtection {
+func (s *Server) crossOriginProtection() *http.CrossOriginProtection {
 	c := http.NewCrossOriginProtection()
+	if s.public != nil {
+		if err := c.AddTrustedOrigin(s.public.Scheme + "://" + s.public.Host); err != nil {
+			s.log.Warn("LABWARDEN_PUBLIC_URL is not usable as a trusted origin", "err", err)
+		}
+	}
 	c.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "cross-origin request refused")
 	}))

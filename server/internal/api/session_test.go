@@ -144,6 +144,19 @@ func TestSessionCookieSecurity(t *testing.T) {
 		}
 	}
 
+	// An https LABWARDEN_PUBLIC_URL makes the cookie Secure for its own host
+	// only: the same server opened by LAN address over HTTP must still log in.
+	public, _ := newTestAPI(t, func(c *Config) { c.PublicURL = "https://labwarden.example" })
+	ph := public.Handler()
+	if ck := loginCookie(t, ph, newReq("10.0.0.2:5000", "http")); ck.Secure {
+		t.Error("LABWARDEN_PUBLIC_URL host: request for another host got a Secure cookie")
+	}
+	byName := newReq("10.0.0.2:5000", "http")
+	byName.Host = "labwarden.example"
+	if ck := loginCookie(t, ph, byName); !ck.Secure || !strings.HasPrefix(ck.Name, "__Host-") {
+		t.Errorf("request for the https LABWARDEN_PUBLIC_URL host: cookie %q secure=%v", ck.Name, ck.Secure)
+	}
+
 	forced, _ := newTestAPI(t, func(c *Config) { c.CookieSecure = true })
 	if ck := loginCookie(t, forced.Handler(), newReq("192.0.2.1:5000", "http")); !ck.Secure || ck.Name != "__Host-"+sessionCookie {
 		t.Errorf("LABWARDEN_COOKIE_SECURE: cookie %q secure=%v", ck.Name, ck.Secure)

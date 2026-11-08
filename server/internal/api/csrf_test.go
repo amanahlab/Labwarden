@@ -3,6 +3,7 @@ package api
 import (
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -63,5 +64,28 @@ func TestChunkedFormPostRefused(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnsupportedMediaType {
 		t.Fatalf("chunked form POST: status %d, want 415", resp.StatusCode)
+	}
+}
+
+// Over plain HTTP browsers send Origin but not Sec-Fetch-Site, and a proxy
+// that rewrites Host makes the dashboard's own origin look foreign unless
+// LABWARDEN_PUBLIC_URL names it.
+func TestPublicURLIsATrustedOrigin(t *testing.T) {
+	post := func(publicURL string) int {
+		srv, _ := newTestAPI(t, func(c *Config) { c.PublicURL = publicURL })
+		r := httptest.NewRequest(http.MethodPost, "http://labwarden:8080/api/v1/auth/logout", nil)
+		r.Header.Set("Origin", "http://labwarden.example")
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, r)
+		return w.Code
+	}
+	if got := post(""); got != http.StatusForbidden {
+		t.Errorf("rewritten Host without LABWARDEN_PUBLIC_URL: status %d, want 403", got)
+	}
+	if got := post("http://labwarden.example/"); got != http.StatusOK {
+		t.Errorf("Origin matching LABWARDEN_PUBLIC_URL: status %d, want 200", got)
+	}
+	if got := post("http://other.example"); got != http.StatusForbidden {
+		t.Errorf("Origin not matching LABWARDEN_PUBLIC_URL: status %d, want 403", got)
 	}
 }

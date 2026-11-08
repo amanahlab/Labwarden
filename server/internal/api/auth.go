@@ -45,7 +45,12 @@ func (s *Server) sessionCookieName(r *http.Request) string {
 	return sessionCookie
 }
 
-func (s *Server) secureCookie(r *http.Request) bool { return s.cfg.CookieSecure || s.viaHTTPS(r) }
+// secureCookie: an https LABWARDEN_PUBLIC_URL only counts for requests to its
+// host, so the dashboard still works when opened by plain-HTTP LAN address.
+func (s *Server) secureCookie(r *http.Request) bool {
+	return s.cfg.CookieSecure || s.viaHTTPS(r) ||
+		s.public != nil && s.public.Scheme == "https" && strings.EqualFold(r.Host, s.public.Host)
+}
 
 // setSessionCookie sets the session cookie, or deletes it when id is empty.
 func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, id string) {
