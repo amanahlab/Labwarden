@@ -3,6 +3,7 @@
 LabWarden: a homelab vulnerability aggregation dashboard. Agents on VMs and Docker hosts run Syft and push SBOMs to a central Go server, which matches them with Grype on a job queue, stores the results in SQLite and serves a React (Chakra UI v3) dashboard. The Grype DB lives on the server only; a new one each night re-matches every stored SBOM. The server can also scan images centrally.
 
 Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
+`AGENTS.md` holds the same project rules for other coding agents. Change both files together.
 
 ## Rules
 
