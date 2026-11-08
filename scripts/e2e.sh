@@ -77,6 +77,7 @@ code=$(vm_post /api/v1/ingest/report '{}')
 [ "$code" = 404 ] || fail "/ingest/report: status $code, want 404"
 pass "/ingest/report is gone"
 # Secrets never reach a command line, where any local user could read them.
+argv_since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 docker compose --profile testbed exec -T testbed-vm sh -c '
   b=Bear; e=vx; labwarden-agent >/tmp/argv-run.log 2>&1 & pid=$!; seen=0
   while kill -0 "$pid" 2>/dev/null; do
@@ -87,6 +88,8 @@ docker compose --profile testbed exec -T testbed-vm sh -c '
   grep -q "uploaded " /tmp/argv-run.log || { echo "the agent run uploaded nothing" >&2; exit 2; }
   exit $seen' || fail "a token or credential appeared on a command line during an agent run (or the run uploaded nothing)"
 pass "no token or credential on any command line during an agent run"
+# Let that run's match land, so it cannot move last_seen in the re-match check.
+wait_for 120 "testbed-vm argv-check run matched" matched_since testbed-vm "$argv_since"
 
 echo "== re-match without an agent run"
 last_seen() { api "$URL/api/v1/hosts?q=$1" | jqr -r --arg n "$1" '.items[] | select(.name == $n) | .last_seen'; }
