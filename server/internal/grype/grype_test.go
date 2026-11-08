@@ -107,3 +107,17 @@ func TestNormalizeSeverity(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeKeepsOnlyWebLinks(t *testing.T) {
+	var cat Vuln
+	merge(&cat, Vulnerability{DataSource: "javascript:alert(1)", URLs: []string{
+		"https://nvd.nist.gov/vuln/detail/CVE-1", "javascript:alert(1)", "data:text/html,x", "HTTP://example.com/a", "ftp://x",
+	}}, true)
+	if cat.DataSource != "" {
+		t.Errorf("DataSource = %q, want it dropped", cat.DataSource)
+	}
+	want := []string{"https://nvd.nist.gov/vuln/detail/CVE-1", "HTTP://example.com/a"}
+	if strings.Join(cat.URLs, " ") != strings.Join(want, " ") {
+		t.Errorf("URLs = %v, want %v", cat.URLs, want)
+	}
+}
