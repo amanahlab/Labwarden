@@ -79,6 +79,8 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/vulnerabilities/{id}", s.getVuln)
 			r.Put("/vulnerabilities/{id}/triage", s.setTriage)
 			r.Get("/findings", s.listFindings)
+			r.Get("/findings/by-host", s.listVulnHosts)
+			r.Get("/findings/by-location", s.listVulnLocations)
 			r.Get("/hosts", s.listHosts)
 			r.Get("/hosts/{id}", s.getHost)
 			r.Patch("/hosts/{id}", s.updateHost)
