@@ -98,7 +98,11 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := s.clientIP(r)
-	if wait := max(s.limiter.blocked(ip), s.budget.wait()); wait > 0 {
+	wait := s.limiter.blocked(ip)
+	if wait == 0 && s.limiter.failed(ip) {
+		wait = s.budget.wait()
+	}
+	if wait > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(int(wait.Seconds())+1))
 		writeErr(w, http.StatusTooManyRequests, "too many attempts, try again later")
 		return
@@ -116,7 +120,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.limiter.fail(ip)
 		s.event(r, "warn", "auth", "", "", "failed admin login from "+ip)
 		if s.budget.spend() {
-			s.event(r, "warn", "auth", "", "", fmt.Sprintf("more than %d failed admin logins in %s from all addresses together: logins are paused until the rate drops", loginBudget, loginBudgetWindow))
+			s.event(r, "warn", "auth", "", "", fmt.Sprintf("more than %d failed admin logins in %s from all addresses together: addresses that already failed are paused until the rate drops", loginBudget, loginBudgetWindow))
 		}
 		writeErr(w, http.StatusUnauthorized, "invalid password")
 		return
