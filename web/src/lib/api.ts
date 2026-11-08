@@ -96,6 +96,30 @@ export interface FindingRow {
   status: TriageStatus
 }
 
+export interface HostVulnRow extends Counts {
+  host_id: number
+  host_name: string
+  group: string
+  kind: string
+  vulns: number
+  kev: number
+  max_risk: number
+  first_seen: string
+}
+
+export interface LocationRow extends Counts {
+  location: string
+  host_id: number
+  host_name: string
+  target_id: number
+  target_name: string
+  packages: string
+  vulns: number
+  kev: number
+  max_risk: number
+  first_seen: string
+}
+
 export interface VulnDetail {
   id: string
   severity: Severity
