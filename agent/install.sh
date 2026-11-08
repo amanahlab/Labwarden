@@ -1,11 +1,14 @@
 #!/bin/sh
 # LabWarden agent installer. Served by the dashboard at /install.sh.
 #
-#   curl -fsSL -o lw-install.sh http://labwarden.lan:8080/install.sh
+#   curl -fsSL -o lw-install.sh https://labwarden.lan:8443/install.sh
 #   echo "<sha256 from Settings>  lw-install.sh" | sha256sum -c
-#   sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=vxe_... sh lw-install.sh
+#   sudo LABWARDEN_URL=https://labwarden.lan:8443 LABWARDEN_TOKEN=vxe_... sh lw-install.sh
 #
-# Optional: LABWARDEN_HOST, LABWARDEN_GROUP, LABWARDEN_SCAN_PATHS, LABWARDEN_SCAN_DOCKER,
+# Optional: LABWARDEN_CA_FILE (PEM CA to trust for the dashboard; copied to
+#           /etc/labwarden/ca.pem), LABWARDEN_DOCKER_URL (tcp://host:port of a
+#           read-only Docker socket proxy),
+#           LABWARDEN_HOST, LABWARDEN_GROUP, LABWARDEN_SCAN_PATHS, LABWARDEN_SCAN_DOCKER,
 #           LABWARDEN_SCHEDULE (systemd OnCalendar, default every 6h),
 #           LABWARDEN_CRON (cron expression used when systemd is absent),
 #           LABWARDEN_INTERVAL (seconds; must match the schedule, default 21600),
@@ -38,6 +41,14 @@ has_ctrl() { [ "$(printf '%s' "$1" | wc -c)" -ne "$(printf '%s' "$1" | tr -d '\0
 # matches <value> <extended regex>: the whole value, which has no control characters.
 matches() { ! has_ctrl "$1" && printf '%s' "$1" | grep -Eq "^($2)\$"; }
 
+# plain_http_remote <url>: true for http:// to anything but this machine.
+plain_http_remote() {
+	case "$1" in http://*) ;; *) return 1 ;; esac
+	_h=${1#http://}
+	_h=${_h%%/*}
+	case "$_h" in localhost | localhost:* | 127.* | "[::1]" | "[::1]:"*) return 1 ;; esac
+}
+
 # validate: refuse any setting that could break out of agent.env, the cron
 # line or the systemd unit.
 validate() {
@@ -54,10 +65,20 @@ validate() {
 		die "LABWARDEN_SCHEDULE must be a systemd OnCalendar expression"
 	[ -z "${LABWARDEN_CRON:-}" ] || matches "$LABWARDEN_CRON" '[0-9*/,-]+( [0-9*/,-]+){4}' ||
 		die "LABWARDEN_CRON must be five cron fields of digits and * / , -"
+	[ -z "${LABWARDEN_DOCKER_URL:-}" ] || matches "$LABWARDEN_DOCKER_URL" 'tcp://[]A-Za-z0-9.:[_-]+' ||
+		die "LABWARDEN_DOCKER_URL must look like tcp://socket-proxy:2375"
+	[ -z "${LABWARDEN_CA_FILE:-}" ] || { ! has_ctrl "$LABWARDEN_CA_FILE" && [ -r "$LABWARDEN_CA_FILE" ]; } ||
+		die "LABWARDEN_CA_FILE must be a readable PEM file"
 }
 
 # fetch <url> <file>: from the dashboard, never following a redirect elsewhere.
-fetch() { curl -fsS --proto =http,https --max-time 120 -o "$2" "$1"; }
+fetch() {
+	if [ -n "${LABWARDEN_CA_FILE:-}" ]; then
+		curl -fsS --proto =http,https --cacert "$LABWARDEN_CA_FILE" --max-time 120 -o "$2" "$1"
+	else
+		curl -fsS --proto =http,https --max-time 120 -o "$2" "$1"
+	fi
+}
 
 # verify <file> <sha256>
 verify() { [ "$(sha256sum "$1" | awk '{print $1}')" = "$2" ]; }
@@ -82,6 +103,10 @@ fi
 : "${LABWARDEN_TOKEN:?set LABWARDEN_TOKEN to an enrollment token from Settings}"
 LABWARDEN_URL=${LABWARDEN_URL%/}
 validate
+if plain_http_remote "$LABWARDEN_URL"; then
+	say "warning: $LABWARDEN_URL is plain http; the enrollment token, the host credential and the SBOMs"
+	say "warning: will cross the network unencrypted. Serve the dashboard over https (README: Security model)."
+fi
 
 for c in curl gzip sha256sum tar; do command -v "$c" >/dev/null 2>&1 || die "$c is required"; done
 matches "$AGENT_SHA256" '[0-9a-f]{64}' || die "download install.sh from the dashboard; this copy carries no agent checksum"
@@ -122,6 +147,11 @@ say "agent installed at $BIN"
 #    on its first run and keeps its own credential in /var/lib/labwarden.
 mkdir -p "$CONF_DIR" /var/lib/labwarden
 chmod 700 "$CONF_DIR" /var/lib/labwarden
+if [ -n "${LABWARDEN_CA_FILE:-}" ]; then
+	[ "$LABWARDEN_CA_FILE" = "$CONF_DIR/ca.pem" ] || cp "$LABWARDEN_CA_FILE" "$CONF_DIR/ca.pem" || die "could not copy $LABWARDEN_CA_FILE"
+	chown 0:0 "$CONF_DIR/ca.pem"
+	chmod 644 "$CONF_DIR/ca.pem"
+fi
 umask 077
 {
 	printf 'LABWARDEN_URL=%s\n' "$(shq "$LABWARDEN_URL")"
@@ -131,6 +161,8 @@ umask 077
 	[ -n "${LABWARDEN_SCAN_PATHS+x}" ] && printf 'LABWARDEN_SCAN_PATHS=%s\n' "$(shq "$LABWARDEN_SCAN_PATHS")"
 	printf 'LABWARDEN_SCAN_DOCKER=%s\n' "$(shq "${LABWARDEN_SCAN_DOCKER:-auto}")"
 	printf 'LABWARDEN_INTERVAL=%s\n' "$(shq "${LABWARDEN_INTERVAL:-21600}")"
+	[ -n "${LABWARDEN_CA_FILE:-}" ] && printf 'LABWARDEN_CA_FILE=%s\n' "$(shq "$CONF_DIR/ca.pem")"
+	[ -n "${LABWARDEN_DOCKER_URL:-}" ] && printf 'LABWARDEN_DOCKER_URL=%s\n' "$(shq "$LABWARDEN_DOCKER_URL")"
 	printf "PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'\n"
 } >"$CONF_DIR/agent.env"
 chown 0:0 "$CONF_DIR/agent.env"

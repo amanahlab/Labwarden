@@ -5,7 +5,8 @@
 #
 # Configuration comes from the environment, optionally loaded from
 # /etc/labwarden/agent.env (see install.sh):
-#   LABWARDEN_URL          dashboard base URL (required), e.g. http://labwarden.lan:8080
+#   LABWARDEN_URL          dashboard base URL (required), e.g. https://labwarden.lan:8443
+#   LABWARDEN_CA_FILE      PEM CA certificate to trust for an https dashboard (e.g. self-signed)
 #   LABWARDEN_TOKEN        enrollment token from Settings; needed until this host has
 #                          enrolled, after which it uses its own credential
 #   LABWARDEN_HOST         host name shown in the dashboard (default: hostname)
@@ -14,6 +15,8 @@
 #   LABWARDEN_SCAN_PATHS   space-separated directories to scan (default: /; empty disables)
 #   LABWARDEN_SCAN_DOCKER  auto | true | false (default: auto = if a Docker socket is reachable)
 #   LABWARDEN_DOCKER_SOCK  Docker socket path (default: /var/run/docker.sock)
+#   LABWARDEN_DOCKER_URL   tcp://host:port of a read-only Docker socket proxy, used
+#                          instead of the socket
 #   LABWARDEN_DOCKER_LABEL only scan containers with this label, e.g. labwarden.scan=true
 #   LABWARDEN_EXCLUDES     space-separated syft --exclude globs for directory scans
 #   LABWARDEN_INTERVAL     seconds between runs, reported so the dashboard can flag silent hosts
@@ -45,6 +48,8 @@ LABWARDEN_GROUP=${LABWARDEN_GROUP:-default}
 LABWARDEN_SCAN_PATHS=${LABWARDEN_SCAN_PATHS-/}
 LABWARDEN_SCAN_DOCKER=${LABWARDEN_SCAN_DOCKER:-auto}
 LABWARDEN_DOCKER_SOCK=${LABWARDEN_DOCKER_SOCK:-/var/run/docker.sock}
+LABWARDEN_DOCKER_URL=${LABWARDEN_DOCKER_URL:-}
+LABWARDEN_CA_FILE=${LABWARDEN_CA_FILE:-}
 LABWARDEN_DOCKER_LABEL=${LABWARDEN_DOCKER_LABEL:-}
 LABWARDEN_EXCLUDES=${LABWARDEN_EXCLUDES-./proc/** ./sys/** ./dev/** ./run/** ./tmp/** ./var/lib/docker/** ./var/lib/containerd/** ./var/lib/labwarden/** ./snap/** ./mnt/** ./media/**}
 LABWARDEN_INTERVAL=${LABWARDEN_INTERVAL:-21600}
@@ -54,6 +59,9 @@ CRED_FILE="$LABWARDEN_STATE/credential"
 CRED=""
 SYFT=${SYFT:-syft}
 export SYFT_CHECK_FOR_APP_UPDATE=false
+# syft's docker: source and the docker CLI reach the engine through DOCKER_HOST.
+if [ -n "$LABWARDEN_DOCKER_URL" ]; then DOCKER_HOST=$LABWARDEN_DOCKER_URL; else DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK"; fi
+export DOCKER_HOST
 
 RUN_ID="$(date +%s)-$$"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/labwarden.XXXXXX") || exit 1
@@ -82,6 +90,29 @@ auth_header() { # auth_header <secret> <file>
 	(umask 077 && printf 'Authorization: Bearer %s\n' "$1" >"$2")
 }
 
+# plain_http_remote <url>: true for http:// to anything but this machine.
+plain_http_remote() {
+	case "$1" in http://*) ;; *) return 1 ;; esac
+	_h=${1#http://}
+	_h=${_h%%/*}
+	case "$_h" in localhost | localhost:* | 127.* | "[::1]" | "[::1]:"*) return 1 ;; esac
+}
+
+# docker_url_ok <url>: tcp://host:port and nothing that could leave the URL.
+docker_url_ok() {
+	case "$1" in tcp://*[!]A-Za-z0-9.:[_-]* | tcp://) return 1 ;; tcp://*) return 0 ;; esac
+	return 1
+}
+
+# dashboard_curl [curl args]: curl to the dashboard, trusting LABWARDEN_CA_FILE.
+dashboard_curl() {
+	if [ -n "$LABWARDEN_CA_FILE" ]; then
+		curl --proto =http,https --cacert "$LABWARDEN_CA_FILE" "$@"
+	else
+		curl --proto =http,https "$@"
+	fi
+}
+
 urlenc() {
 	printf '%s' "$1" | od -An -tx1 -v | tr -d ' \n' | sed 's/\(..\)/%\1/g'
 }
@@ -89,7 +120,7 @@ urlenc() {
 api() { # api <path> <content-type> <body-file> [extra curl args]
 	_path=$1 _ctype=$2 _file=$3
 	shift 3
-	curl -fsS --proto =http,https --retry 3 --retry-delay 5 --max-time 120 \
+	dashboard_curl -fsS --retry 3 --retry-delay 5 --max-time 120 \
 		-H "@$WORK/auth.hdr" -H "Content-Type: ${_ctype}" -H "User-Agent: labwarden-agent/${AGENT_VERSION}" \
 		--data-binary "@${_file}" "$@" "${LABWARDEN_URL}${_path}"
 }
@@ -124,7 +155,7 @@ enroll() {
 	fi
 	printf '{"host":%s}' "$(json_str "$LABWARDEN_HOST")" >"$WORK/enroll.json"
 	: >"$WORK/enrolled.json"
-	_code=$(curl -sS --proto =http,https --max-time 60 -H "@$WORK/enroll.hdr" -H "Content-Type: application/json" \
+	_code=$(dashboard_curl -sS --max-time 60 -H "@$WORK/enroll.hdr" -H "Content-Type: application/json" \
 		-H "User-Agent: labwarden-agent/${AGENT_VERSION}" --data-binary "@$WORK/enroll.json" \
 		-o "$WORK/enrolled.json" -w '%{http_code}' "${LABWARDEN_URL}/api/v1/ingest/enroll")
 	case "$_code" in
@@ -168,13 +199,17 @@ docker_enabled() {
 	true) return 0 ;;
 	false) return 1 ;;
 	esac
-	[ -S "$LABWARDEN_DOCKER_SOCK" ]
+	[ -n "$LABWARDEN_DOCKER_URL" ] || [ -S "$LABWARDEN_DOCKER_SOCK" ]
 }
 
-docker_api() { # docker_api <path> [curl args]: Docker Engine API over the socket
+docker_api() { # docker_api <path> [curl args]: Docker Engine API over the socket or the proxy
 	_p=$1
 	shift
-	curl -fsS --unix-socket "$LABWARDEN_DOCKER_SOCK" "$@" "http://localhost$_p"
+	if [ -n "$LABWARDEN_DOCKER_URL" ]; then
+		curl -fsS --proto =http "$@" "http://${LABWARDEN_DOCKER_URL#tcp://}$_p"
+	else
+		curl -fsS --unix-socket "$LABWARDEN_DOCKER_SOCK" "$@" "http://localhost$_p"
+	fi
 }
 
 # One line per distinct running image: "<image-id> <container-id> <name>". The
@@ -189,11 +224,11 @@ docker_images() {
 		done
 	elif command -v docker >/dev/null 2>&1; then
 		if [ -n "$LABWARDEN_DOCKER_LABEL" ]; then
-			DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker ps -q --filter "label=$LABWARDEN_DOCKER_LABEL"
+			docker ps -q --filter "label=$LABWARDEN_DOCKER_LABEL"
 		else
-			DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker ps -q
+			docker ps -q
 		fi | while read -r _c; do
-			DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker inspect --format '{{.Image}} {{.Id}} {{.Config.Image}}' "$_c" </dev/null
+			docker inspect --format '{{.Image}} {{.Id}} {{.Config.Image}}' "$_c" </dev/null
 		done
 	else
 		event error "docker scanning needs jq or the docker CLI"
@@ -205,7 +240,7 @@ image_id_of() { # image_id_of <name>: current image ID behind a tag
 	if command -v jq >/dev/null 2>&1; then
 		docker_api "/images/$1/json" 2>/dev/null | jq -r '.Id'
 	else
-		DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker image inspect --format '{{.Id}}' "$1" </dev/null 2>/dev/null
+		docker image inspect --format '{{.Id}}' "$1" </dev/null 2>/dev/null
 	fi
 }
 
@@ -213,7 +248,7 @@ save_image() { # save_image <image-id> <file>
 	if command -v jq >/dev/null 2>&1; then
 		docker_api "/images/$1/get" -o "$2"
 	else
-		DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker save -o "$2" "$1" </dev/null
+		docker save -o "$2" "$1" </dev/null
 	fi
 }
 
@@ -222,7 +257,7 @@ export_container() { # export_container <container-id> <dir>: unpack its filesys
 	if command -v jq >/dev/null 2>&1; then
 		docker_api "/containers/$1/export" | tar -xof - -C "$2" 2>/dev/null
 	else
-		DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker export "$1" </dev/null | tar -xof - -C "$2" 2>/dev/null
+		docker export "$1" </dev/null | tar -xof - -C "$2" 2>/dev/null
 	fi
 	[ -d "$2/etc" ] || [ -d "$2/usr" ]
 }
@@ -341,6 +376,12 @@ scan() {
 
 main() {
 	(umask 077 && mkdir -p "$LABWARDEN_STATE") || { log error "cannot create $LABWARDEN_STATE" && exit 1; }
+	if [ -n "$LABWARDEN_DOCKER_URL" ] && ! docker_url_ok "$LABWARDEN_DOCKER_URL"; then
+		log error "LABWARDEN_DOCKER_URL must look like tcp://socket-proxy:2375" && exit 1
+	fi
+	if [ -n "$LABWARDEN_CA_FILE" ] && [ ! -r "$LABWARDEN_CA_FILE" ]; then
+		log error "LABWARDEN_CA_FILE $LABWARDEN_CA_FILE is not readable" && exit 1
+	fi
 	if ! mkdir "$LOCK" 2>/dev/null; then
 		# A run killed without its trap (SIGKILL, power loss, a stopped
 		# container) leaves the lock behind; take it over if its owner is gone.
@@ -360,6 +401,9 @@ main() {
 	KIND=${LABWARDEN_KIND:-}
 	if [ -z "$KIND" ]; then
 		if docker_enabled; then KIND=docker; else KIND=vm; fi
+	fi
+	if plain_http_remote "$LABWARDEN_URL"; then
+		log warn "$LABWARDEN_URL is plain http: the host credential and the SBOMs cross the network unencrypted; serve the dashboard over https"
 	fi
 	load_credential || enroll || log warn "not enrolled with the dashboard; SBOMs will be spooled"
 
@@ -401,7 +445,7 @@ main() {
 				if scan_image "$id" "$cid" "$name"; then scanned=$((scanned + 1)); else failed=$((failed + 1)); fi
 			done <"$WORK/images.txt"
 		else
-			event error "could not list containers via $LABWARDEN_DOCKER_SOCK"
+			event error "could not list containers via ${LABWARDEN_DOCKER_URL:-$LABWARDEN_DOCKER_SOCK}"
 			failed=$((failed + 1))
 		fi
 	fi
