@@ -3,7 +3,7 @@
 A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog their packages with [Syft](https://github.com/anchore/syft) on a schedule and push the SBOMs to one central server. The server matches them with [Grype](https://github.com/anchore/grype) against the only copy of the vulnerability DB, tracks what is new or fixed, and shows everything in a web UI. When a new DB arrives each night, every stored SBOM is matched again.
 
 - **Overview**: critical/high counts, known exploited (CISA KEV), fix availability, a 7/30/90-day trend, the riskiest hosts and the top vulnerabilities.
-- **Vulnerabilities**: one row per CVE/GHSA or per package instance. Search, sort, filter by severity, KEV, fix state, triage status, group and ecosystem. Paginated, with CSV export.
+- **Vulnerabilities**: one row per CVE/GHSA, per package instance, per host or per package location (path on a target), each drilling down to its package instances. Search, sort, filter by severity, KEV, fix state, triage status, group and ecosystem. Paginated, with CSV export.
 - **Vulnerability detail**: description, references, CVSS, EPSS, risk, CWEs, affected packages, and triage (acknowledge, ignore, or mark as a false positive, globally or for one host).
 - **Hosts**: health (healthy, stale, failing), grouped by group or kind, plus per-host findings, targets, scan history and logs.
 - **Scans and Logs**: every report received, and every agent run, warning and error. Logs have a live tail.

@@ -21,6 +21,7 @@ func findingFilter(r *http.Request) store.FindingFilter {
 		HostID:   qInt64(r, "host_id"),
 		TargetID: qInt64(r, "target_id"),
 		VulnID:   q.Get("vuln_id"),
+		Location: q.Get("location"),
 		Group:    q.Get("group"),
 		PkgType:  q.Get("pkg_type"),
 		KEV:      q.Get("kev") == "true",
@@ -137,6 +138,24 @@ func (s *Server) setTriage(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listFindings(w http.ResponseWriter, r *http.Request) {
 	out, err := s.st.ListFindings(r.Context(), findingFilter(r), pageFrom(r))
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) listVulnHosts(w http.ResponseWriter, r *http.Request) {
+	out, err := s.st.ListVulnHosts(r.Context(), findingFilter(r), pageFrom(r))
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) listVulnLocations(w http.ResponseWriter, r *http.Request) {
+	out, err := s.st.ListVulnLocations(r.Context(), findingFilter(r), pageFrom(r))
 	if err != nil {
 		s.storeErr(w, r, err)
 		return
