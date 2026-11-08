@@ -157,15 +157,10 @@ func (s *Scanner) swapDB(ctx context.Context, staging string) error {
 	if err != nil {
 		return err
 	}
-	// TryLock rather than Lock: a waiting Lock would hold up new scans until
-	// every running one finished. The renames themselves take microseconds.
-	for !s.dbLock.TryLock() {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(50 * time.Millisecond):
-		}
-	}
+	// A waiting Lock holds up new scans until the running ones finish (each
+	// bounded by its job timeout); polling TryLock instead could starve
+	// forever while a busy queue always has a scan running.
+	s.dbLock.Lock()
 	var old []string
 	for _, e := range entries {
 		if !e.IsDir() || strings.HasPrefix(e.Name(), "grype-db-download") {

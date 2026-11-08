@@ -191,21 +191,31 @@ func TestUpdateDBRunsOneAtATime(t *testing.T) {
 	}
 }
 
-func TestSwapGivesUpRatherThanBlockingScans(t *testing.T) {
+func TestSwapWaitsForRunningScans(t *testing.T) {
 	f := newFake(t, "2026-01-01T00:00:00Z")
 	staging := filepath.Join(f.dbDir, stagingDir)
 	if err := os.MkdirAll(filepath.Join(staging, "6"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f.s.dbLock.RLock() // a scan that runs past the update's deadline
-	defer f.s.dbLock.RUnlock()
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	if err := f.s.swapDB(ctx, staging); err == nil {
-		t.Fatal("swap succeeded while a scan held the DB")
-	}
+	f.writeAbs(filepath.Join(staging, "6", "vulnerability.db"), "2026-02-02T00:00:00Z")
+	f.s.dbLock.RLock() // a running scan
+	done := make(chan error, 1)
+	go func() { done <- f.s.swapDB(context.Background(), staging) }()
+	time.Sleep(200 * time.Millisecond)
 	if f.live() != "2026-01-01T00:00:00Z" {
 		t.Fatal("live DB changed under a running scan")
+	}
+	f.s.dbLock.RUnlock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("swap did not happen after the scan finished")
+	}
+	if f.live() != "2026-02-02T00:00:00Z" {
+		t.Fatalf("live DB = %q after the swap", f.live())
 	}
 }
 
