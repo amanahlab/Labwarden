@@ -91,6 +91,9 @@ enroll() {
 		log error "this host is not enrolled and LABWARDEN_TOKEN is not set; re-run install.sh with an enrollment token from Settings"
 		return 1
 	fi
+	# The dashboard hands out a credential only once: make sure it can be kept.
+	mkdir -p "$LABWARDEN_STATE" && chmod 700 "$LABWARDEN_STATE" && (umask 077 && : >"$CRED_FILE.tmp") ||
+		{ log error "cannot write the credential to $LABWARDEN_STATE; not enrolling" && return 1; }
 	printf '{"host":%s}' "$(json_str "$LABWARDEN_HOST")" >"$WORK/enroll.json"
 	: >"$WORK/enrolled.json"
 	_code=$(curl -sS --max-time 60 -H "Authorization: Bearer ${LABWARDEN_TOKEN}" -H "Content-Type: application/json" \
@@ -235,13 +238,14 @@ query_for() { # query_for <target-name> <duration-ms>
 }
 
 # upload <gz-file> <query>: the server answers 202 and matches it in
-# the background. Returns 2 when the server rejects the content itself (bad or
-# too large), which no retry can fix; 1 for anything worth retrying later.
+# the background. Returns 2 when the server rejects the upload itself (bad, too
+# large, or for another host), which no retry can fix; 1 for anything worth
+# retrying later.
 upload() {
 	: >"$WORK/resp.json" # curl -f writes no body on an error; never report the last success
 	_code=$(api "/api/v1/ingest/sbom?$2" application/json "$1" -H "Content-Encoding: gzip" \
 		-o "$WORK/resp.json" -w '%{http_code}') && return 0
-	case "$_code" in 400 | 413 | 415 | 422) return 2 ;; esac
+	case "$_code" in 400 | 403 | 413 | 415 | 422) return 2 ;; esac
 	return 1
 }
 
