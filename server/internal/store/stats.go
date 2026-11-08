@@ -28,23 +28,23 @@ type TopHost struct {
 }
 
 type Summary struct {
-	Findings       Counts      `json:"findings"`        // package instances
-	Unique         Counts      `json:"unique"`          // distinct vulnerability IDs
-	KEV            int         `json:"kev"`             // distinct known-exploited vulns
-	Hosts          int         `json:"hosts"`
-	StaleHosts     int         `json:"stale_hosts"`
-	FailingHosts   int         `json:"failing_hosts"`
-	Targets        int         `json:"targets"`
-	NewLast7d      int         `json:"new_last_7d"`
-	Scans24h       int         `json:"scans_24h"`
-	LastScan       string      `json:"last_scan"`
-	ByFixState     []NameCount `json:"by_fix_state"`
-	ByPkgType      []NameCount `json:"by_pkg_type"`
-	ByGroup        []NameCount `json:"by_group"`
-	ByStatus       []NameCount `json:"by_status"`
-	TopVulns       []TopVuln   `json:"top_vulns"`
-	TopHosts       []TopHost   `json:"top_hosts"`
-	TopPackages    []NameCount `json:"top_packages"`
+	Findings     Counts      `json:"findings"` // package instances
+	Unique       Counts      `json:"unique"`   // distinct vulnerability IDs
+	KEV          int         `json:"kev"`      // distinct known-exploited vulns
+	Hosts        int         `json:"hosts"`
+	StaleHosts   int         `json:"stale_hosts"`
+	FailingHosts int         `json:"failing_hosts"`
+	Targets      int         `json:"targets"`
+	NewLast7d    int         `json:"new_last_7d"`
+	Scans24h     int         `json:"scans_24h"`
+	LastScan     string      `json:"last_scan"`
+	ByFixState   []NameCount `json:"by_fix_state"`
+	ByPkgType    []NameCount `json:"by_pkg_type"`
+	ByGroup      []NameCount `json:"by_group"`
+	ByStatus     []NameCount `json:"by_status"`
+	TopVulns     []TopVuln   `json:"top_vulns"`
+	TopHosts     []TopHost   `json:"top_hosts"`
+	TopPackages  []NameCount `json:"top_packages"`
 }
 
 const activeCF = `current_findings WHERE status IN ('open','acknowledged')`
