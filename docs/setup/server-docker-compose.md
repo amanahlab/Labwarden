@@ -63,7 +63,7 @@ The full list is in the README under **Server configuration**.
 
 If you already have a certificate and key, for example from your own CA or from an ACME client, the dashboard can serve HTTPS directly.
 
-1. Put both files in a `certs` folder next to `docker-compose.yml`. The dashboard runs as user 10001, so let it read the key:
+1. Put `fullchain.pem` and `privkey.pem` in a `certs` folder next to `docker-compose.yml`. Keep nothing else there, such as a CA key. The dashboard runs as user 10001, so let it read the key:
 
    ```bash
    sudo chown 10001 certs/privkey.pem && sudo chmod 600 certs/privkey.pem
@@ -75,7 +75,8 @@ If you already have a certificate and key, for example from your own CA or from 
    services:
      labwarden:
        volumes:
-         - ./certs:/certs:ro
+         - ./certs/fullchain.pem:/certs/fullchain.pem:ro
+         - ./certs/privkey.pem:/certs/privkey.pem:ro
    ```
 
 3. Add to `.env`:
@@ -107,7 +108,8 @@ All state lives in one Docker volume, `labwarden_labwarden-data`: the database, 
 ```bash
 mkdir -p backups && chmod 700 backups
 docker compose stop labwarden
-docker run --rm -v labwarden_labwarden-data:/data:ro -v "$PWD/backups:/backup" alpine:3.22 \
+docker run --rm -v labwarden_labwarden-data:/data:ro -v "$PWD/backups:/backup" \
+  alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f \
   tar czf "/backup/labwarden-$(date +%F).tar.gz" -C /data --exclude ./grype-db --exclude ./tmp .
 docker compose start labwarden
 ```

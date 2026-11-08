@@ -142,5 +142,5 @@ sudo rm -f /usr/local/bin/syft && sudo rm -rf /var/lib/labwarden
 - **Keep `/etc/labwarden` and `/var/lib/labwarden` root-only.** The installer sets this up. Don't loosen the permissions, and don't copy `agent.env` to other machines.
 - **Don't skip certificate checks.** Give the agent your CA with `LABWARDEN_CA_FILE` instead of using `-k` or an http address.
 - **Prefer systemd over cron.** On systemd the agent runs in a sandbox: most of the system is read-only to it, and it can't gain privileges or change kernel settings.
-- **Leave the scan scope wide.** Scanning `/` finds the most. The agent already skips `/proc`, `/sys`, `/tmp`, `/mnt`, `/media` and Docker's own storage, so there is rarely a reason to narrow it.
+- **Leave the scan scope wide.** Scanning `/` finds the most. The agent already skips system folders such as `/proc`, `/sys` and `/tmp`, mounted drives under `/mnt` and `/media`, and Docker's own storage, so there is rarely a reason to narrow it.
 - **Act when a machine is compromised or retired:** delete it in the dashboard or click **Reset credential**, and revoke the token that enrolled it.

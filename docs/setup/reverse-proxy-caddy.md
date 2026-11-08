@@ -135,7 +135,7 @@ The CA certificate is valid for 10 years. The certificates Caddy issues from it 
 2. Sign out, then sign in once with a **wrong** password on purpose.
 3. Sign in properly and open **Logs**. You should see `failed admin login from <your computer's address>`.
 
-   If it names `172.30.0.10` instead, the dashboard doesn't trust Caddy: check `LABWARDEN_TRUSTED_PROXIES`. If it names `172.30.0.1`, Caddy isn't at its fixed address: check the override file.
+   If it names a Docker address instead, such as `172.30.0.10` or `172.18.0.3`, the dashboard doesn't trust Caddy: check that `LABWARDEN_TRUSTED_PROXIES` matches the fixed address in the override file, and that `docker compose down` and `up -d` were run after adding it.
 
 4. From another machine, `http://<docker-host>:8080` should no longer answer.
 

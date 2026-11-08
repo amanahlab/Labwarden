@@ -68,6 +68,7 @@ server_tokens off;
 server {
     listen 80;
     server_name labwarden.example.lan;
+    # Only a redirect, no content: nginx answers it before any allow/deny rule.
     return 301 https://$host$request_uri;
 }
 
@@ -202,7 +203,7 @@ If the certificate comes from your own CA:
 2. Sign out, then sign in once with a **wrong** password on purpose.
 3. Sign in properly and open **Logs**. You should see `failed admin login from <your computer's address>`.
 
-   If it names `172.30.0.10` instead, the dashboard doesn't trust nginx: check `LABWARDEN_TRUSTED_PROXIES`. If it names `172.30.0.1`, nginx isn't at its fixed address: check the override file.
+   If it names a Docker address instead, such as `172.30.0.10` or `172.18.0.3`, the dashboard doesn't trust nginx: check that `LABWARDEN_TRUSTED_PROXIES` matches the fixed address in the override file, and that `docker compose down` and `up -d` were run after adding it.
 
 4. From another machine, `http://<docker-host>:8080` should no longer answer.
 
