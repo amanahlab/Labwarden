@@ -1,11 +1,11 @@
 #!/bin/sh
-# Run the agent now and then every VULNX_INTERVAL seconds. Failures are
+# Run the agent now and then every LABWARDEN_INTERVAL seconds. Failures are
 # reported to the dashboard by the agent itself; the loop keeps going.
 set -u
-interval=${VULNX_INTERVAL:-21600}
+interval=${LABWARDEN_INTERVAL:-21600}
 trap 'exit 0' TERM INT
 while :; do
-	/usr/local/bin/vulnx-agent || true
+	/usr/local/bin/labwarden-agent || true
 	sleep "$interval" &
 	wait $!
 done

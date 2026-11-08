@@ -3,5 +3,5 @@ package agent
 
 import "embed"
 
-//go:embed vulnx-agent.sh install.sh
+//go:embed labwarden-agent.sh install.sh
 var FS embed.FS

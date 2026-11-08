@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/coronas2k/vulnx/server/internal/store"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 func findingFilter(r *http.Request) store.FindingFilter {
@@ -59,7 +59,7 @@ func (s *Server) exportVulns(w http.ResponseWriter, r *http.Request) {
 	p := pageFrom(r)
 	p.Page, p.Size = 1, 500
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="vulnx-findings.csv"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="labwarden-findings.csv"`)
 	cw := csv.NewWriter(w)
 	_ = cw.Write([]string{"host", "group", "target", "vulnerability", "severity", "cvss", "epss", "kev", "package", "version", "type", "fix_state", "fix_versions", "status", "first_seen"})
 	for {

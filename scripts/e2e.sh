@@ -7,7 +7,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 [ -f .env ] || scripts/dev-env.sh
 set -a; . ./.env; set +a
-URL="http://localhost:${VULNX_PORT:-8080}"
+URL="http://localhost:${LABWARDEN_PORT:-8080}"
 JAR=$(mktemp); trap 'rm -f "$JAR"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -27,14 +27,14 @@ echo "== starting stack"
 docker compose --profile testbed up -d --build --quiet-pull >/dev/null
 wait_for 120 "dashboard healthy" curl -fsS "$URL/healthz"
 
-printf '{"password":"%s"}' "$VULNX_ADMIN_PASSWORD" | api -o /dev/null -H 'Content-Type: application/json' --data-binary @- "$URL/api/v1/auth/login" ||
+printf '{"password":"%s"}' "$LABWARDEN_ADMIN_PASSWORD" | api -o /dev/null -H 'Content-Type: application/json' --data-binary @- "$URL/api/v1/auth/login" ||
   fail "login"
 pass "admin login"
 
 host_id() { api "$URL/api/v1/hosts?q=$1" | jqr -e --arg n "$1" '.items[] | select(.name == $n and .total > 0) | .id'; }
 wait_for 900 "testbed-vm reported findings" host_id testbed-vm
 # Don't wait for the 15-minute loop: run the docker agent now (a no-op if a run is in progress).
-docker compose --profile testbed exec -T testbed-docker-agent vulnx-agent >/dev/null 2>&1 || true
+docker compose --profile testbed exec -T testbed-docker-agent labwarden-agent >/dev/null 2>&1 || true
 wait_for 900 "testbed-docker reported findings" host_id testbed-docker
 
 has_vuln() { # has_vuln <query> <jq filter on items>
@@ -65,11 +65,11 @@ pass "central scan target and its host cleaned up"
 
 echo "== retirement of a removed container"
 DID=$(host_id testbed-docker)
-run_agent() { docker compose --profile testbed exec -T testbed-docker-agent vulnx-agent >/dev/null 2>&1; }
+run_agent() { docker compose --profile testbed exec -T testbed-docker-agent labwarden-agent >/dev/null 2>&1; }
 workload_retired() { # workload_retired <true|false>: runs the agent once, then checks
   run_agent || return 1
   api "$URL/api/v1/hosts/$DID" | jqr -e --argjson want "$1" \
-    '[.targets[] | select(.name == "vulnx-testbed-workload:latest") | .retired_at != ""] | (length > 0 and all == $want)'
+    '[.targets[] | select(.name == "labwarden-testbed-workload:latest") | .retired_at != ""] | (length > 0 and all == $want)'
 }
 docker compose --profile testbed stop testbed-workload >/dev/null
 wait_for 300 "workload image retired after it stopped running" workload_retired true

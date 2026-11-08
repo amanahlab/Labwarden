@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coronas2k/vulnx/server/internal/grype"
-	"github.com/coronas2k/vulnx/server/internal/store"
+	"github.com/amanahlab/labwarden/server/internal/grype"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 type Scanner struct {
@@ -157,7 +157,7 @@ func (s *Scanner) scanCentral(ctx context.Context, id int64) {
 
 // ScanSBOM scans an uploaded Syft SBOM and stores the result.
 func (s *Scanner) ScanSBOM(ctx context.Context, m store.IngestMeta, r io.Reader) (*store.IngestResult, error) {
-	f, err := os.CreateTemp("", "vulnx-sbom-*.json")
+	f, err := os.CreateTemp("", "labwarden-sbom-*.json")
 	if err != nil {
 		return nil, err
 	}

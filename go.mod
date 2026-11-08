@@ -1,4 +1,4 @@
-module github.com/coronas2k/vulnx
+module github.com/amanahlab/labwarden
 
 go 1.27
 

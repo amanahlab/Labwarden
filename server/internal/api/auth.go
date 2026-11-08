@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coronas2k/vulnx/server/internal/store"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 const (
-	sessionCookie = "vulnx_session"
+	sessionCookie = "labwarden_session"
 	sessionTTL    = 7 * 24 * time.Hour
 )
 

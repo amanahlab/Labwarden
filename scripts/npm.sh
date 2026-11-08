@@ -5,5 +5,5 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 exec docker run --rm \
   -v "$ROOT/web:/web" -w /web \
-  -v vulnx-npm-cache:/root/.npm \
+  -v labwarden-npm-cache:/root/.npm \
   node:24-alpine npm "$@"

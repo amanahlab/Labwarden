@@ -1,66 +1,67 @@
-# VulnX dashboard. `docker compose up -d --build` -> http://localhost:8080
+name: labwarden
+# LabWarden dashboard. `docker compose up -d --build` -> http://localhost:8080
 # The testbed (deliberately vulnerable hosts) runs with: --profile testbed
 services:
-  vulnx:
+  labwarden:
     build:
       context: .
       args:
-        VERSION: ${VULNX_VERSION:-dev}
-    image: vulnx:latest
+        VERSION: ${LABWARDEN_VERSION:-dev}
+    image: labwarden:latest
     restart: unless-stopped
     ports:
-      - "${VULNX_PORT:-8080}:8080"
+      - "${LABWARDEN_PORT:-8080}:8080"
     env_file:
       - path: .env
         required: false
     environment:
-      VULNX_DATA: /data
+      LABWARDEN_DATA: /data
     volumes:
-      - vulnx-data:/data
+      - labwarden-data:/data
 
   # --- testbed: proving ground, never deploy these -------------------------
   testbed-vm:
     profiles: [testbed]
     build: testbed/vm
     hostname: testbed-vm
-    depends_on: [vulnx]
+    depends_on: [labwarden]
     environment:
-      VULNX_URL: http://vulnx:8080
-      VULNX_TOKEN: ${VULNX_INGEST_TOKEN:?run scripts/dev-env.sh first}
-      VULNX_HOST: testbed-vm
-      VULNX_GROUP: testbed
-      VULNX_SCAN_PATHS: /
-      VULNX_SCAN_DOCKER: "false"
-      VULNX_CRON: "*/15 * * * *"
-      VULNX_INTERVAL: "900"
+      LABWARDEN_URL: http://labwarden:8080
+      LABWARDEN_TOKEN: ${LABWARDEN_INGEST_TOKEN:?run scripts/dev-env.sh first}
+      LABWARDEN_HOST: testbed-vm
+      LABWARDEN_GROUP: testbed
+      LABWARDEN_SCAN_PATHS: /
+      LABWARDEN_SCAN_DOCKER: "false"
+      LABWARDEN_CRON: "*/15 * * * *"
+      LABWARDEN_INTERVAL: "900"
     volumes:
-      - testbed-vm-state:/var/lib/vulnx
+      - testbed-vm-state:/var/lib/labwarden
 
   testbed-workload:
     profiles: [testbed]
     build: testbed/docker
-    image: vulnx-testbed-workload:latest
+    image: labwarden-testbed-workload:latest
     labels:
-      vulnx.scan: "true"
+      labwarden.scan: "true"
 
   testbed-docker-agent:
     profiles: [testbed]
     build: agent
-    image: vulnx-agent:latest
+    image: labwarden-agent:latest
     hostname: testbed-docker
-    depends_on: [vulnx, testbed-workload]
+    depends_on: [labwarden, testbed-workload]
     environment:
-      VULNX_URL: http://vulnx:8080
-      VULNX_TOKEN: ${VULNX_INGEST_TOKEN:?run scripts/dev-env.sh first}
-      VULNX_HOST: testbed-docker
-      VULNX_GROUP: testbed
-      VULNX_DOCKER_LABEL: vulnx.scan=true
-      VULNX_INTERVAL: "900"
+      LABWARDEN_URL: http://labwarden:8080
+      LABWARDEN_TOKEN: ${LABWARDEN_INGEST_TOKEN:?run scripts/dev-env.sh first}
+      LABWARDEN_HOST: testbed-docker
+      LABWARDEN_GROUP: testbed
+      LABWARDEN_DOCKER_LABEL: labwarden.scan=true
+      LABWARDEN_INTERVAL: "900"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - testbed-docker-state:/var/lib/vulnx
+      - testbed-docker-state:/var/lib/labwarden
 
 volumes:
-  vulnx-data: {}
+  labwarden-data: {}
   testbed-vm-state: {}
   testbed-docker-state: {}

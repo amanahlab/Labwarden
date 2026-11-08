@@ -33,7 +33,7 @@ export function LoginPage() {
               <Stack gap="3" align="center" textAlign="center">
                 <Logo size={40} />
                 <Box>
-                  <Heading size="lg">Sign in to VulnX</Heading>
+                  <Heading size="lg">Sign in to LabWarden</Heading>
                   <Text color="fg.muted" textStyle="sm">
                     Vulnerability dashboard for your homelab
                   </Text>

@@ -1,5 +1,5 @@
 // Package grype parses Grype JSON reports (`grype -o json`) into the
-// normalized shape VulnX stores.
+// normalized shape LabWarden stores.
 package grype
 
 import (
@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-// Report is the subset of the Grype JSON document VulnX consumes.
+// Report is the subset of the Grype JSON document LabWarden consumes.
 type Report struct {
 	Matches    []Match    `json:"matches"`
 	Source     Source     `json:"source"`
@@ -143,7 +143,7 @@ func (r *Report) TargetName() string {
 	return r.Source.Type
 }
 
-// TargetType maps the Grype source type onto VulnX target types.
+// TargetType maps the Grype source type onto LabWarden target types.
 func (r *Report) TargetType() string {
 	switch r.Source.Type {
 	case "image":

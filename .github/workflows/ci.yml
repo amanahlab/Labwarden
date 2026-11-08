@@ -15,5 +15,5 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Same entrypoint as local development: everything runs in containers.
       - run: scripts/test.sh
-      - run: docker build --build-arg VERSION=${GITHUB_SHA::7} -t vulnx:ci .
-      - run: docker build -t vulnx-agent:ci agent/
+      - run: docker build --build-arg VERSION=${GITHUB_SHA::7} -t labwarden:ci .
+      - run: docker build -t labwarden-agent:ci agent/

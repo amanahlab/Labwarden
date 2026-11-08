@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/coronas2k/vulnx/server/internal/grype"
-	"github.com/coronas2k/vulnx/server/internal/store"
+	"github.com/amanahlab/labwarden/server/internal/grype"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 type hook struct {
@@ -77,7 +77,7 @@ func wait(t *testing.T, h *hook) (*http.Request, []byte) {
 
 func TestAlertOnFirstScanThenQuietOnRepeat(t *testing.T) {
 	ts, h := receiver(t, http.StatusNoContent)
-	_, st := setup(t, Config{URL: ts.URL, MinSeverity: "Critical", KEV: true, PublicURL: "http://vulnx.lan/"})
+	_, st := setup(t, Config{URL: ts.URL, MinSeverity: "Critical", KEV: true, PublicURL: "http://labwarden.lan/"})
 	ctx := context.Background()
 	meta := store.IngestMeta{Host: "vm-1", Kind: "vm"}
 
@@ -95,7 +95,7 @@ func TestAlertOnFirstScanThenQuietOnRepeat(t *testing.T) {
 	if err := json.Unmarshal(b, &p); err != nil {
 		t.Fatal(err)
 	}
-	if p.Host != "vm-1" || len(p.Findings) == 0 || p.Text == "" || p.Content != p.Text || !strings.HasPrefix(p.Link, "http://vulnx.lan/hosts/") {
+	if p.Host != "vm-1" || len(p.Findings) == 0 || p.Text == "" || p.Content != p.Text || !strings.HasPrefix(p.Link, "http://labwarden.lan/hosts/") {
 		t.Fatalf("payload: %s", b)
 	}
 	for _, f := range p.Findings {
@@ -173,7 +173,7 @@ func TestNtfyFormat(t *testing.T) {
 		t.Fatal(err)
 	}
 	r, b := wait(t, h)
-	if r.Header.Get("Title") != "VulnX test notification" || r.Header.Get("Priority") != "3" || !strings.Contains(string(b), "working") {
+	if r.Header.Get("Title") != "LabWarden test notification" || r.Header.Get("Priority") != "3" || !strings.Contains(string(b), "working") {
 		t.Fatalf("headers %v body %q", r.Header, b)
 	}
 }

@@ -1,4 +1,4 @@
-// Package api serves the VulnX REST API, agent files and the web UI.
+// Package api serves the LabWarden REST API, agent files and the web UI.
 package api
 
 import (
@@ -14,9 +14,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/coronas2k/vulnx/server/internal/notify"
-	"github.com/coronas2k/vulnx/server/internal/scanner"
-	"github.com/coronas2k/vulnx/server/internal/store"
+	"github.com/amanahlab/labwarden/server/internal/notify"
+	"github.com/amanahlab/labwarden/server/internal/scanner"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 type Config struct {
@@ -51,7 +51,7 @@ func (s *Server) Handler() http.Handler {
 
 	r.Get("/healthz", s.health)
 	r.Get("/install.sh", s.agentFile("install.sh"))
-	r.Get("/agent/vulnx-agent.sh", s.agentFile("vulnx-agent.sh"))
+	r.Get("/agent/labwarden-agent.sh", s.agentFile("labwarden-agent.sh"))
 
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Post("/auth/login", s.login)
@@ -151,7 +151,7 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 	}
 	index, err := fs.ReadFile(s.webFS, "index.html")
 	if err != nil {
-		http.Error(w, "VulnX UI is not built into this binary. The API is available under /api/v1.", http.StatusNotFound)
+		http.Error(w, "LabWarden UI is not built into this binary. The API is available under /api/v1.", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coronas2k/vulnx/server/internal/grype"
+	"github.com/amanahlab/labwarden/server/internal/grype"
 )
 
 // IngestMeta describes where a report came from.

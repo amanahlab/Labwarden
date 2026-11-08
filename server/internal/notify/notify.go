@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coronas2k/vulnx/server/internal/grype"
-	"github.com/coronas2k/vulnx/server/internal/store"
+	"github.com/amanahlab/labwarden/server/internal/grype"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 // Formats: "json" posts {title, text, content, message, ...}, which Slack,
@@ -43,19 +43,19 @@ func New(cfg Config, st *store.Store, log *slog.Logger) (*Notifier, error) {
 		cfg.Format = "json"
 	}
 	if !Formats[cfg.Format] {
-		return nil, fmt.Errorf("VULNX_NOTIFY_FORMAT must be json or ntfy")
+		return nil, fmt.Errorf("LABWARDEN_NOTIFY_FORMAT must be json or ntfy")
 	}
 	if cfg.MinSeverity == "" {
 		cfg.MinSeverity = "Critical"
 	}
 	cfg.MinSeverity = grype.NormalizeSeverity(cfg.MinSeverity)
 	if grype.SeverityRank(cfg.MinSeverity) < grype.SeverityRank("Low") {
-		return nil, fmt.Errorf("VULNX_NOTIFY_MIN_SEVERITY must be Critical, High, Medium or Low")
+		return nil, fmt.Errorf("LABWARDEN_NOTIFY_MIN_SEVERITY must be Critical, High, Medium or Low")
 	}
 	if cfg.URL != "" {
 		u, err := url.Parse(cfg.URL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return nil, fmt.Errorf("VULNX_NOTIFY_URL must be an http(s) URL")
+			return nil, fmt.Errorf("LABWARDEN_NOTIFY_URL must be an http(s) URL")
 		}
 	}
 	cfg.PublicURL = strings.TrimRight(cfg.PublicURL, "/")
@@ -190,9 +190,9 @@ func line(f store.NewFinding) string {
 // Test sends a sample alert so the configuration can be checked from the UI.
 func (n *Notifier) Test(ctx context.Context) error {
 	if !n.Enabled() {
-		return errors.New("notifications are not configured (set VULNX_NOTIFY_URL)")
+		return errors.New("notifications are not configured (set LABWARDEN_NOTIFY_URL)")
 	}
-	msg := Message{Title: "VulnX test notification", Priority: 3,
+	msg := Message{Title: "LabWarden test notification", Priority: 3,
 		Lines: []string{"Notifications are working. You will be alerted about new " + n.cfg.MinSeverity + "+ findings" + map[bool]string{true: " and known-exploited ones.", false: "."}[n.cfg.KEV]}}
 	if n.cfg.PublicURL != "" {
 		msg.Link = n.cfg.PublicURL

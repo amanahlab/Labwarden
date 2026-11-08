@@ -6,7 +6,7 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   server: {
     host: true,
-    proxy: { '/api': process.env.VULNX_API ?? 'http://localhost:8080' },
+    proxy: { '/api': process.env.LABWARDEN_API ?? 'http://localhost:8080' },
   },
   build: { chunkSizeWarningLimit: 600 },
 })

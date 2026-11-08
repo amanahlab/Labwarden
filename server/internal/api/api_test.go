@@ -18,9 +18,9 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/coronas2k/vulnx/server/internal/notify"
-	"github.com/coronas2k/vulnx/server/internal/scanner"
-	"github.com/coronas2k/vulnx/server/internal/store"
+	"github.com/amanahlab/labwarden/server/internal/notify"
+	"github.com/amanahlab/labwarden/server/internal/scanner"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 const (
@@ -30,7 +30,7 @@ const (
 
 func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "vulnx.db"))
+	st, err := store.Open(filepath.Join(t.TempDir(), "labwarden.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +39,8 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agentFS := fstest.MapFS{"install.sh": {Data: []byte("#!/bin/sh\n")}, "vulnx-agent.sh": {Data: []byte("#!/bin/sh\n")}}
-	webFS := fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>VulnX</title>")}}
+	agentFS := fstest.MapFS{"install.sh": {Data: []byte("#!/bin/sh\n")}, "labwarden-agent.sh": {Data: []byte("#!/bin/sh\n")}}
+	webFS := fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>LabWarden</title>")}}
 	nt, err := notify.New(notify.Config{MinSeverity: "Critical"}, st, log)
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +194,7 @@ func TestUIRequiresSession(t *testing.T) {
 
 func TestPublicEndpoints(t *testing.T) {
 	ts, _ := newTestServer(t)
-	for _, p := range []string{"/healthz", "/install.sh", "/agent/vulnx-agent.sh", "/", "/hosts/42"} {
+	for _, p := range []string{"/healthz", "/install.sh", "/agent/labwarden-agent.sh", "/", "/hosts/42"} {
 		if code := getJSON(t, http.DefaultClient, ts.URL+p, nil); code != http.StatusOK {
 			t.Errorf("GET %s: status %d", p, code)
 		}

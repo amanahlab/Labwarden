@@ -1,23 +1,23 @@
 #!/bin/sh
-# VulnX agent installer. Served by the dashboard at /install.sh.
+# LabWarden agent installer. Served by the dashboard at /install.sh.
 #
-#   curl -fsSL http://vulnx.lan:8080/install.sh | sudo VULNX_URL=http://vulnx.lan:8080 VULNX_TOKEN=vx_... sh
+#   curl -fsSL http://labwarden.lan:8080/install.sh | sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=vx_... sh
 #
-# Optional: VULNX_HOST, VULNX_GROUP, VULNX_SCAN_PATHS, VULNX_SCAN_DOCKER,
-#           VULNX_SCHEDULE (systemd OnCalendar, default every 6h),
-#           VULNX_CRON (cron expression used when systemd is absent),
-#           VULNX_INTERVAL (seconds; must match the schedule, default 21600),
-#           GRYPE_VERSION (default pinned below), VULNX_RUN_NOW=0 to skip the first scan.
+# Optional: LABWARDEN_HOST, LABWARDEN_GROUP, LABWARDEN_SCAN_PATHS, LABWARDEN_SCAN_DOCKER,
+#           LABWARDEN_SCHEDULE (systemd OnCalendar, default every 6h),
+#           LABWARDEN_CRON (cron expression used when systemd is absent),
+#           LABWARDEN_INTERVAL (seconds; must match the schedule, default 21600),
+#           GRYPE_VERSION (default pinned below), LABWARDEN_RUN_NOW=0 to skip the first scan.
 # Uninstall: curl -fsSL .../install.sh | sudo sh -s -- --uninstall
 set -eu
 
 GRYPE_VERSION=${GRYPE_VERSION:-v0.121.2}
-BIN=/usr/local/bin/vulnx-agent
-CONF_DIR=/etc/vulnx
+BIN=/usr/local/bin/labwarden-agent
+CONF_DIR=/etc/labwarden
 UNIT_DIR=/etc/systemd/system
 
-say() { printf 'vulnx: %s\n' "$*"; }
-die() { printf 'vulnx: error: %s\n' "$*" >&2; exit 1; }
+say() { printf 'labwarden: %s\n' "$*"; }
+die() { printf 'labwarden: error: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo)"
 
@@ -25,19 +25,19 @@ has_systemd() { [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>
 
 if [ "${1:-}" = "--uninstall" ]; then
 	if has_systemd; then
-		systemctl disable --now vulnx-agent.timer 2>/dev/null || true
-		rm -f "$UNIT_DIR/vulnx-agent.service" "$UNIT_DIR/vulnx-agent.timer"
+		systemctl disable --now labwarden-agent.timer 2>/dev/null || true
+		rm -f "$UNIT_DIR/labwarden-agent.service" "$UNIT_DIR/labwarden-agent.timer"
 		systemctl daemon-reload
 	fi
-	rm -f /etc/cron.d/vulnx-agent "$BIN"
+	rm -f /etc/cron.d/labwarden-agent "$BIN"
 	rm -rf "$CONF_DIR"
-	say "agent removed (grype and /var/lib/vulnx were left in place)"
+	say "agent removed (grype and /var/lib/labwarden were left in place)"
 	exit 0
 fi
 
-: "${VULNX_URL:?set VULNX_URL to the dashboard URL}"
-: "${VULNX_TOKEN:?set VULNX_TOKEN to an ingest token from Settings}"
-VULNX_URL=${VULNX_URL%/}
+: "${LABWARDEN_URL:?set LABWARDEN_URL to the dashboard URL}"
+: "${LABWARDEN_TOKEN:?set LABWARDEN_TOKEN to an ingest token from Settings}"
+LABWARDEN_URL=${LABWARDEN_URL%/}
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v gzip >/dev/null 2>&1 || die "gzip is required"
@@ -51,24 +51,24 @@ else
 fi
 
 # 2. agent script, from the dashboard so it always matches the server
-curl -fsSL "$VULNX_URL/agent/vulnx-agent.sh" -o "$BIN.tmp"
+curl -fsSL "$LABWARDEN_URL/agent/labwarden-agent.sh" -o "$BIN.tmp"
 head -n1 "$BIN.tmp" | grep -q '^#!/bin/sh' || die "downloaded agent does not look like a script"
 chmod 755 "$BIN.tmp" && mv "$BIN.tmp" "$BIN"
 say "agent installed at $BIN"
 
 # 3. configuration (contains the token: root-only)
-mkdir -p "$CONF_DIR" /var/lib/vulnx/grype-db
-chmod 700 "$CONF_DIR" /var/lib/vulnx
+mkdir -p "$CONF_DIR" /var/lib/labwarden/grype-db
+chmod 700 "$CONF_DIR" /var/lib/labwarden
 umask 077
 {
-	printf "VULNX_URL='%s'\n" "$VULNX_URL"
-	printf "VULNX_TOKEN='%s'\n" "$VULNX_TOKEN"
-	[ -n "${VULNX_HOST:-}" ] && printf "VULNX_HOST='%s'\n" "$VULNX_HOST"
-	printf "VULNX_GROUP='%s'\n" "${VULNX_GROUP:-default}"
-	[ -n "${VULNX_SCAN_PATHS+x}" ] && printf "VULNX_SCAN_PATHS='%s'\n" "$VULNX_SCAN_PATHS"
-	printf "VULNX_SCAN_DOCKER='%s'\n" "${VULNX_SCAN_DOCKER:-auto}"
-	printf "VULNX_INTERVAL='%s'\n" "${VULNX_INTERVAL:-21600}"
-	printf "GRYPE_DB_CACHE_DIR='/var/lib/vulnx/grype-db'\n"
+	printf "LABWARDEN_URL='%s'\n" "$LABWARDEN_URL"
+	printf "LABWARDEN_TOKEN='%s'\n" "$LABWARDEN_TOKEN"
+	[ -n "${LABWARDEN_HOST:-}" ] && printf "LABWARDEN_HOST='%s'\n" "$LABWARDEN_HOST"
+	printf "LABWARDEN_GROUP='%s'\n" "${LABWARDEN_GROUP:-default}"
+	[ -n "${LABWARDEN_SCAN_PATHS+x}" ] && printf "LABWARDEN_SCAN_PATHS='%s'\n" "$LABWARDEN_SCAN_PATHS"
+	printf "LABWARDEN_SCAN_DOCKER='%s'\n" "${LABWARDEN_SCAN_DOCKER:-auto}"
+	printf "LABWARDEN_INTERVAL='%s'\n" "${LABWARDEN_INTERVAL:-21600}"
+	printf "GRYPE_DB_CACHE_DIR='/var/lib/labwarden/grype-db'\n"
 	printf "PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'\n"
 } >"$CONF_DIR/agent.env"
 umask 022
@@ -76,25 +76,25 @@ say "configuration written to $CONF_DIR/agent.env"
 
 # 4. schedule
 if has_systemd; then
-	cat >"$UNIT_DIR/vulnx-agent.service" <<'EOF'
+	cat >"$UNIT_DIR/labwarden-agent.service" <<'EOF'
 [Unit]
-Description=VulnX vulnerability scan (grype)
+Description=LabWarden vulnerability scan (grype)
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/vulnx-agent
+ExecStart=/usr/local/bin/labwarden-agent
 Nice=10
 IOSchedulingClass=idle
 TimeoutStartSec=2h
 EOF
-	cat >"$UNIT_DIR/vulnx-agent.timer" <<EOF
+	cat >"$UNIT_DIR/labwarden-agent.timer" <<EOF
 [Unit]
-Description=Run the VulnX scan on a schedule
+Description=Run the LabWarden scan on a schedule
 
 [Timer]
-OnCalendar=${VULNX_SCHEDULE:-*-*-* 00/6:00:00}
+OnCalendar=${LABWARDEN_SCHEDULE:-*-*-* 00/6:00:00}
 RandomizedDelaySec=15m
 Persistent=true
 
@@ -102,19 +102,19 @@ Persistent=true
 WantedBy=timers.target
 EOF
 	systemctl daemon-reload
-	systemctl enable --now vulnx-agent.timer
-	say "systemd timer enabled: $(systemctl list-timers vulnx-agent.timer --no-legend 2>/dev/null | head -n1)"
-	[ "${VULNX_RUN_NOW:-1}" = "1" ] && systemctl start --no-block vulnx-agent.service && say "first scan started: journalctl -u vulnx-agent -f"
+	systemctl enable --now labwarden-agent.timer
+	say "systemd timer enabled: $(systemctl list-timers labwarden-agent.timer --no-legend 2>/dev/null | head -n1)"
+	[ "${LABWARDEN_RUN_NOW:-1}" = "1" ] && systemctl start --no-block labwarden-agent.service && say "first scan started: journalctl -u labwarden-agent -f"
 else
 	minute=$(awk 'BEGIN{srand(); print int(rand()*60)}')
-	cron=${VULNX_CRON:-"$minute */6 * * *"}
+	cron=${LABWARDEN_CRON:-"$minute */6 * * *"}
 	if [ -d /etc/cron.d ]; then
-		printf 'SHELL=/bin/sh\n%s root %s >>/var/log/vulnx-agent.log 2>&1\n' "$cron" "$BIN" >/etc/cron.d/vulnx-agent
-		chmod 644 /etc/cron.d/vulnx-agent
+		printf 'SHELL=/bin/sh\n%s root %s >>/var/log/labwarden-agent.log 2>&1\n' "$cron" "$BIN" >/etc/cron.d/labwarden-agent
+		chmod 644 /etc/cron.d/labwarden-agent
 	else
-		(crontab -l 2>/dev/null | grep -v vulnx-agent; printf '%s %s >>/var/log/vulnx-agent.log 2>&1\n' "$cron" "$BIN") | crontab -
+		(crontab -l 2>/dev/null | grep -v labwarden-agent; printf '%s %s >>/var/log/labwarden-agent.log 2>&1\n' "$cron" "$BIN") | crontab -
 	fi
-	say "cron schedule installed: $cron (log: /var/log/vulnx-agent.log)"
-	[ "${VULNX_RUN_NOW:-1}" = "1" ] && (nohup "$BIN" >>/var/log/vulnx-agent.log 2>&1 &) && say "first scan started in the background"
+	say "cron schedule installed: $cron (log: /var/log/labwarden-agent.log)"
+	[ "${LABWARDEN_RUN_NOW:-1}" = "1" ] && (nohup "$BIN" >>/var/log/labwarden-agent.log 2>&1 &) && say "first scan started in the background"
 fi
 say "done. The host appears in the dashboard after its first scan."

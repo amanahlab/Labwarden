@@ -1,4 +1,4 @@
-// Typed client for the VulnX REST API (/api/v1).
+// Typed client for the LabWarden REST API (/api/v1).
 
 export type Severity = "Critical" | "High" | "Medium" | "Low" | "Negligible" | "Unknown"
 export const SEVERITIES: Severity[] = ["Critical", "High", "Medium", "Low", "Negligible", "Unknown"]

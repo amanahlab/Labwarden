@@ -1,47 +1,47 @@
 #!/bin/sh
-# VulnX agent: runs Grype on this machine and pushes the reports to a VulnX
+# LabWarden agent: runs Grype on this machine and pushes the reports to a LabWarden
 # dashboard. Scans the root filesystem (VM mode) and/or every image used by a
 # running container (Docker mode). Logs to stdout and to the dashboard.
 #
 # Configuration comes from the environment, optionally loaded from
-# /etc/vulnx/agent.env (see install.sh):
-#   VULNX_URL          dashboard base URL (required), e.g. http://vulnx.lan:8080
-#   VULNX_TOKEN        ingest token (required)
-#   VULNX_HOST         host name shown in the dashboard (default: hostname)
-#   VULNX_GROUP        host group (default: default)
-#   VULNX_KIND         vm | docker (default: docker when scanning containers, else vm)
-#   VULNX_SCAN_PATHS   space-separated directories to scan (default: /; empty disables)
-#   VULNX_SCAN_DOCKER  auto | true | false (default: auto = if a Docker socket is reachable)
-#   VULNX_DOCKER_SOCK  Docker socket path (default: /var/run/docker.sock)
-#   VULNX_DOCKER_LABEL only scan containers with this label, e.g. vulnx.scan=true
-#   VULNX_EXCLUDES     space-separated grype --exclude globs for directory scans
-#   VULNX_INTERVAL     seconds between runs, reported so the dashboard can flag silent hosts
-#   VULNX_SPOOL        directory for reports that failed to upload (default: /var/lib/vulnx/spool)
+# /etc/labwarden/agent.env (see install.sh):
+#   LABWARDEN_URL          dashboard base URL (required), e.g. http://labwarden.lan:8080
+#   LABWARDEN_TOKEN        ingest token (required)
+#   LABWARDEN_HOST         host name shown in the dashboard (default: hostname)
+#   LABWARDEN_GROUP        host group (default: default)
+#   LABWARDEN_KIND         vm | docker (default: docker when scanning containers, else vm)
+#   LABWARDEN_SCAN_PATHS   space-separated directories to scan (default: /; empty disables)
+#   LABWARDEN_SCAN_DOCKER  auto | true | false (default: auto = if a Docker socket is reachable)
+#   LABWARDEN_DOCKER_SOCK  Docker socket path (default: /var/run/docker.sock)
+#   LABWARDEN_DOCKER_LABEL only scan containers with this label, e.g. labwarden.scan=true
+#   LABWARDEN_EXCLUDES     space-separated grype --exclude globs for directory scans
+#   LABWARDEN_INTERVAL     seconds between runs, reported so the dashboard can flag silent hosts
+#   LABWARDEN_SPOOL        directory for reports that failed to upload (default: /var/lib/labwarden/spool)
 #   GRYPE_DB_CACHE_DIR where grype keeps its vulnerability DB
 set -u
 
 AGENT_VERSION="1.0.0"
 
-if [ -f /etc/vulnx/agent.env ]; then set -a; . /etc/vulnx/agent.env; set +a; fi
+if [ -f /etc/labwarden/agent.env ]; then set -a; . /etc/labwarden/agent.env; set +a; fi
 
-: "${VULNX_URL:?VULNX_URL is required}"
-: "${VULNX_TOKEN:?VULNX_TOKEN is required}"
-VULNX_URL=${VULNX_URL%/}
-VULNX_HOST=${VULNX_HOST:-$(hostname 2>/dev/null || cat /etc/hostname)}
-VULNX_GROUP=${VULNX_GROUP:-default}
-VULNX_SCAN_PATHS=${VULNX_SCAN_PATHS-/}
-VULNX_SCAN_DOCKER=${VULNX_SCAN_DOCKER:-auto}
-VULNX_DOCKER_SOCK=${VULNX_DOCKER_SOCK:-/var/run/docker.sock}
-VULNX_DOCKER_LABEL=${VULNX_DOCKER_LABEL:-}
-VULNX_EXCLUDES=${VULNX_EXCLUDES-./proc/** ./sys/** ./dev/** ./run/** ./tmp/** ./var/lib/docker/** ./var/lib/containerd/** ./var/lib/vulnx/** ./snap/** ./mnt/** ./media/**}
-VULNX_INTERVAL=${VULNX_INTERVAL:-21600}
-VULNX_SPOOL=${VULNX_SPOOL:-/var/lib/vulnx/spool}
+: "${LABWARDEN_URL:?LABWARDEN_URL is required}"
+: "${LABWARDEN_TOKEN:?LABWARDEN_TOKEN is required}"
+LABWARDEN_URL=${LABWARDEN_URL%/}
+LABWARDEN_HOST=${LABWARDEN_HOST:-$(hostname 2>/dev/null || cat /etc/hostname)}
+LABWARDEN_GROUP=${LABWARDEN_GROUP:-default}
+LABWARDEN_SCAN_PATHS=${LABWARDEN_SCAN_PATHS-/}
+LABWARDEN_SCAN_DOCKER=${LABWARDEN_SCAN_DOCKER:-auto}
+LABWARDEN_DOCKER_SOCK=${LABWARDEN_DOCKER_SOCK:-/var/run/docker.sock}
+LABWARDEN_DOCKER_LABEL=${LABWARDEN_DOCKER_LABEL:-}
+LABWARDEN_EXCLUDES=${LABWARDEN_EXCLUDES-./proc/** ./sys/** ./dev/** ./run/** ./tmp/** ./var/lib/docker/** ./var/lib/containerd/** ./var/lib/labwarden/** ./snap/** ./mnt/** ./media/**}
+LABWARDEN_INTERVAL=${LABWARDEN_INTERVAL:-21600}
+LABWARDEN_SPOOL=${LABWARDEN_SPOOL:-/var/lib/labwarden/spool}
 GRYPE=${GRYPE:-grype}
 export GRYPE_CHECK_FOR_APP_UPDATE=false
 
 RUN_ID="$(date +%s)-$$"
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/vulnx.XXXXXX") || exit 1
-LOCK="${TMPDIR:-/tmp}/vulnx-agent.lock"
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/labwarden.XXXXXX") || exit 1
+LOCK="${TMPDIR:-/tmp}/labwarden-agent.lock"
 trap 'rm -rf "$WORK"' EXIT INT TERM
 
 log() { printf '%s [%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$2"; }
@@ -59,15 +59,15 @@ api() { # api <path> <content-type> <body-file> [extra curl args]
 	_path=$1 _ctype=$2 _file=$3
 	shift 3
 	curl -fsS --retry 3 --retry-delay 5 --max-time 600 \
-		-H "Authorization: Bearer ${VULNX_TOKEN}" -H "Content-Type: ${_ctype}" -H "User-Agent: vulnx-agent/${AGENT_VERSION}" \
-		--data-binary "@${_file}" "$@" "${VULNX_URL}${_path}"
+		-H "Authorization: Bearer ${LABWARDEN_TOKEN}" -H "Content-Type: ${_ctype}" -H "User-Agent: labwarden-agent/${AGENT_VERSION}" \
+		--data-binary "@${_file}" "$@" "${LABWARDEN_URL}${_path}"
 }
 
 # event <level> <message>: log locally and ship to the dashboard (best effort).
 event() {
 	log "$1" "$2"
 	printf '{"host":%s,"level":%s,"run_id":%s,"message":%s}' \
-		"$(json_str "$VULNX_HOST")" "$(json_str "$1")" "$(json_str "$RUN_ID")" "$(json_str "$2")" >"$WORK/event.json"
+		"$(json_str "$LABWARDEN_HOST")" "$(json_str "$1")" "$(json_str "$RUN_ID")" "$(json_str "$2")" >"$WORK/event.json"
 	api /api/v1/ingest/event application/json "$WORK/event.json" -o /dev/null 2>/dev/null || true
 }
 
@@ -85,24 +85,24 @@ host_ip() {
 
 run_status() { # run_status <started|ok|error> <message> [targets-json-array]
 	printf '{"host":%s,"kind":%s,"group":%s,"os":%s,"arch":%s,"ip":%s,"agent_version":%s,"interval":%s,"run_id":%s,"status":%s,"message":%s,"targets":%s}' \
-		"$(json_str "$VULNX_HOST")" "$(json_str "$KIND")" "$(json_str "$VULNX_GROUP")" "$(json_str "$(host_os)")" \
-		"$(json_str "$(uname -m)")" "$(json_str "$(host_ip)")" "$(json_str "$AGENT_VERSION")" "$VULNX_INTERVAL" \
+		"$(json_str "$LABWARDEN_HOST")" "$(json_str "$KIND")" "$(json_str "$LABWARDEN_GROUP")" "$(json_str "$(host_os)")" \
+		"$(json_str "$(uname -m)")" "$(json_str "$(host_ip)")" "$(json_str "$AGENT_VERSION")" "$LABWARDEN_INTERVAL" \
 		"$(json_str "$RUN_ID")" "$(json_str "$1")" "$(json_str "$2")" "${3:-[]}" >"$WORK/run.json"
 	api /api/v1/ingest/run application/json "$WORK/run.json" -o /dev/null
 }
 
 docker_enabled() {
-	case "$VULNX_SCAN_DOCKER" in
+	case "$LABWARDEN_SCAN_DOCKER" in
 	true) return 0 ;;
 	false) return 1 ;;
 	esac
-	[ -S "$VULNX_DOCKER_SOCK" ]
+	[ -S "$LABWARDEN_DOCKER_SOCK" ]
 }
 
 docker_api() { # docker_api <path> [curl args]: Docker Engine API over the socket
 	_p=$1
 	shift
-	curl -fsS --unix-socket "$VULNX_DOCKER_SOCK" "$@" "http://localhost$_p"
+	curl -fsS --unix-socket "$LABWARDEN_DOCKER_SOCK" "$@" "http://localhost$_p"
 }
 
 # One line per distinct running image: "<image-id> <container-id> <name>". The
@@ -111,17 +111,17 @@ docker_api() { # docker_api <path> [curl args]: Docker Engine API over the socke
 docker_images() {
 	if command -v jq >/dev/null 2>&1; then
 		_filter=""
-		[ -n "$VULNX_DOCKER_LABEL" ] && _filter="?filters=$(urlenc "{\"label\":[$(json_str "$VULNX_DOCKER_LABEL")]}")"
+		[ -n "$LABWARDEN_DOCKER_LABEL" ] && _filter="?filters=$(urlenc "{\"label\":[$(json_str "$LABWARDEN_DOCKER_LABEL")]}")"
 		docker_api "/containers/json$_filter" | jq -r '.[].Id' | while read -r _c; do
 			docker_api "/containers/$_c/json" | jq -r '.Image + " " + .Id + " " + .Config.Image'
 		done
 	elif command -v docker >/dev/null 2>&1; then
-		if [ -n "$VULNX_DOCKER_LABEL" ]; then
-			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps -q --filter "label=$VULNX_DOCKER_LABEL"
+		if [ -n "$LABWARDEN_DOCKER_LABEL" ]; then
+			DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker ps -q --filter "label=$LABWARDEN_DOCKER_LABEL"
 		else
-			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker ps -q
+			DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker ps -q
 		fi | while read -r _c; do
-			DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker inspect --format '{{.Image}} {{.Id}} {{.Config.Image}}' "$_c" </dev/null
+			DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker inspect --format '{{.Image}} {{.Id}} {{.Config.Image}}' "$_c" </dev/null
 		done
 	else
 		event error "docker scanning needs jq or the docker CLI"
@@ -133,7 +133,7 @@ image_id_of() { # image_id_of <name>: current image ID behind a tag
 	if command -v jq >/dev/null 2>&1; then
 		docker_api "/images/$1/json" 2>/dev/null | jq -r '.Id'
 	else
-		DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker image inspect --format '{{.Id}}' "$1" </dev/null 2>/dev/null
+		DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker image inspect --format '{{.Id}}' "$1" </dev/null 2>/dev/null
 	fi
 }
 
@@ -141,7 +141,7 @@ save_image() { # save_image <image-id> <file>
 	if command -v jq >/dev/null 2>&1; then
 		docker_api "/images/$1/get" -o "$2"
 	else
-		DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker save -o "$2" "$1" </dev/null
+		DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker save -o "$2" "$1" </dev/null
 	fi
 }
 
@@ -150,7 +150,7 @@ export_container() { # export_container <container-id> <dir>: unpack its filesys
 	if command -v jq >/dev/null 2>&1; then
 		docker_api "/containers/$1/export" | tar -xf - -C "$2" 2>/dev/null
 	else
-		DOCKER_HOST="unix://$VULNX_DOCKER_SOCK" docker export "$1" </dev/null | tar -xf - -C "$2" 2>/dev/null
+		DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK" docker export "$1" </dev/null | tar -xf - -C "$2" 2>/dev/null
 	fi
 	[ -d "$2/etc" ] || [ -d "$2/usr" ]
 }
@@ -179,19 +179,19 @@ scan_image() {
 		rm -rf "$WORK/rootfs"
 		return 1
 	fi
-	_ex=$VULNX_EXCLUDES
-	VULNX_EXCLUDES=""
+	_ex=$LABWARDEN_EXCLUDES
+	LABWARDEN_EXCLUDES=""
 	scan "dir:$WORK/rootfs" "$3"
 	_rc=$?
-	VULNX_EXCLUDES=$_ex
+	LABWARDEN_EXCLUDES=$_ex
 	rm -rf "$WORK/rootfs"
 	return $_rc
 }
 
 query_for() { # query_for <target-name> <duration-ms>
 	printf 'host=%s&kind=%s&group=%s&os=%s&arch=%s&ip=%s&agent_version=%s&interval=%s&run_id=%s&target=%s&duration_ms=%s' \
-		"$(urlenc "$VULNX_HOST")" "$KIND" "$(urlenc "$VULNX_GROUP")" "$(urlenc "$(host_os)")" "$(uname -m)" \
-		"$(urlenc "$(host_ip)")" "$AGENT_VERSION" "$VULNX_INTERVAL" "$RUN_ID" "$(urlenc "$1")" "$2"
+		"$(urlenc "$LABWARDEN_HOST")" "$KIND" "$(urlenc "$LABWARDEN_GROUP")" "$(urlenc "$(host_os)")" "$(uname -m)" \
+		"$(urlenc "$(host_ip)")" "$AGENT_VERSION" "$LABWARDEN_INTERVAL" "$RUN_ID" "$(urlenc "$1")" "$2"
 }
 
 upload() { # upload <gz-file> <query>
@@ -200,8 +200,8 @@ upload() { # upload <gz-file> <query>
 
 # Re-send reports that failed to upload on an earlier run.
 flush_spool() {
-	[ -d "$VULNX_SPOOL" ] || return 0
-	for f in "$VULNX_SPOOL"/*.json.gz; do
+	[ -d "$LABWARDEN_SPOOL" ] || return 0
+	for f in "$LABWARDEN_SPOOL"/*.json.gz; do
 		[ -f "$f" ] || continue
 		if upload "$f" "$(cat "${f%.json.gz}.query")" 2>/dev/null; then
 			rm -f "$f" "${f%.json.gz}.query"
@@ -214,11 +214,11 @@ flush_spool() {
 }
 
 spool() { # spool <gz-file> <query>
-	mkdir -p "$VULNX_SPOOL" && chmod 700 "$VULNX_SPOOL"
-	_name="$VULNX_SPOOL/$(date +%s)-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+	mkdir -p "$LABWARDEN_SPOOL" && chmod 700 "$LABWARDEN_SPOOL"
+	_name="$LABWARDEN_SPOOL/$(date +%s)-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 	cp "$1" "$_name.json.gz" && printf '%s' "$2" >"$_name.query"
 	# keep the spool bounded
-	ls -1t "$VULNX_SPOOL"/*.json.gz 2>/dev/null | tail -n +21 | while read -r old; do rm -f "$old" "${old%.json.gz}.query"; done
+	ls -1t "$LABWARDEN_SPOOL"/*.json.gz 2>/dev/null | tail -n +21 | while read -r old; do rm -f "$old" "${old%.json.gz}.query"; done
 }
 
 # scan <grype-source> <target-name>
@@ -228,7 +228,7 @@ scan() {
 	_start=$(date +%s)
 	set -f # keep exclude globs literal
 	_excl=""
-	case "$_src" in dir:*) for e in $VULNX_EXCLUDES; do _excl="$_excl --exclude $e"; done ;; esac
+	case "$_src" in dir:*) for e in $LABWARDEN_EXCLUDES; do _excl="$_excl --exclude $e"; done ;; esac
 	# shellcheck disable=SC2086
 	if ! "$GRYPE" "$_src" -o json $_excl >"$WORK/report.json" 2>"$WORK/grype.err"; then
 		set +f
@@ -250,12 +250,12 @@ scan() {
 
 main() {
 	if ! mkdir "$LOCK" 2>/dev/null; then
-		log warn "another vulnx-agent run is in progress; exiting"
+		log warn "another labwarden-agent run is in progress; exiting"
 		exit 0
 	fi
 	trap 'rm -rf "$WORK"; rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
 
-	KIND=${VULNX_KIND:-}
+	KIND=${LABWARDEN_KIND:-}
 	if [ -z "$KIND" ]; then
 		if docker_enabled; then KIND=docker; else KIND=vm; fi
 	fi
@@ -268,7 +268,7 @@ main() {
 
 	_t0=$(date +%s)
 	run_status started "scan run started (agent $AGENT_VERSION, $($GRYPE version 2>/dev/null | awk '/^Version:/{print "grype " $2}'))" ||
-		log warn "dashboard unreachable at $VULNX_URL; reports will be spooled"
+		log warn "dashboard unreachable at $LABWARDEN_URL; reports will be spooled"
 	flush_spool
 
 	if ! "$GRYPE" db update -q >"$WORK/db.log" 2>&1; then
@@ -280,7 +280,7 @@ main() {
 	targets=""
 	add_target() { targets="$targets$(json_str "$1"),"; }
 
-	for p in $VULNX_SCAN_PATHS; do
+	for p in $LABWARDEN_SCAN_PATHS; do
 		add_target "$p"
 		if scan "dir:$p" "$p"; then scanned=$((scanned + 1)); else failed=$((failed + 1)); fi
 	done
@@ -294,7 +294,7 @@ main() {
 				if scan_image "$id" "$cid" "$name"; then scanned=$((scanned + 1)); else failed=$((failed + 1)); fi
 			done <"$WORK/images.txt"
 		else
-			event error "could not list containers via $VULNX_DOCKER_SOCK"
+			event error "could not list containers via $LABWARDEN_DOCKER_SOCK"
 			failed=$((failed + 1))
 		fi
 	fi

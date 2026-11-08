@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/coronas2k/vulnx/server/internal/grype"
-	"github.com/coronas2k/vulnx/server/internal/store"
+	"github.com/amanahlab/labwarden/server/internal/grype"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 var hostnameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)

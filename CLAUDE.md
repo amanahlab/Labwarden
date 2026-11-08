@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-VulnX: a homelab vulnerability aggregation dashboard. Agents on VMs and Docker hosts run Grype and push JSON reports to a central Go server, which stores them in SQLite and serves a React (Chakra UI v3) dashboard. The server can also scan images centrally.
+LabWarden: a homelab vulnerability aggregation dashboard. Agents on VMs and Docker hosts run Grype and push JSON reports to a central Go server, which stores them in SQLite and serves a React (Chakra UI v3) dashboard. The server can also scan images centrally.
 
 Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 
@@ -17,7 +17,7 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 
 | Part | Where |
 |---|---|
-| Go server entrypoint | `server/cmd/vulnx` |
+| Go server entrypoint | `server/cmd/labwarden` |
 | Grype JSON parser (fixtures in `testdata/`) | `server/internal/grype` |
 | SQLite store, schema, queries | `server/internal/store` |
 | HTTP API (`/api/v1`), auth, ingest | `server/internal/api` |
@@ -37,5 +37,5 @@ docker compose up -d --build   # dashboard on http://localhost:8080
 
 ## Contracts
 
-- Agents talk to the server only through `/api/v1/ingest/*` with `Authorization: Bearer <token>`. Changing these endpoints or their query parameters means updating `agent/vulnx-agent.sh` and the README in the same commit.
+- Agents talk to the server only through `/api/v1/ingest/*` with `Authorization: Bearer <token>`. Changing these endpoints or their query parameters means updating `agent/labwarden-agent.sh` and the README in the same commit.
 - Schema changes are additive migrations appended in `server/internal/store/migrations.go`; never edit an applied migration.

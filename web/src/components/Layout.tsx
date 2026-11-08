@@ -87,7 +87,7 @@ function Brand() {
     <HStack gap="2.5" px="3" mb="6">
       <Logo />
       <Text fontWeight="bold" textStyle="lg" letterSpacing="-0.02em">
-        VulnX
+        LabWarden
       </Text>
     </HStack>
   )
@@ -128,7 +128,7 @@ export function Layout() {
         <Nav />
         <Box mt="auto" px="3">
           <Text textStyle="xs" color="fg.subtle">
-            VulnX {me?.version ?? ""}
+            LabWarden {me?.version ?? ""}
           </Text>
         </Box>
       </Box>

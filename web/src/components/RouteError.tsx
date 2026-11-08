@@ -4,7 +4,7 @@ import { Button } from "@chakra-ui/react"
 import { LuRefreshCw, LuTriangleAlert } from "react-icons/lu"
 import { Empty } from "@/components/common"
 
-const RELOADED = "vulnx-chunk-reload"
+const RELOADED = "labwarden-chunk-reload"
 
 // A redeploy replaces the hashed page chunks; an open tab then fails to load them.
 function isStaleChunk(err: unknown) {
@@ -29,7 +29,7 @@ export function RouteError() {
   return (
     <Empty
       icon={<LuTriangleAlert />}
-      title={stale ? "VulnX was updated" : "This page failed to load"}
+      title={stale ? "LabWarden was updated" : "This page failed to load"}
       description={stale ? "Reload to get the new version." : message}
       action={
         <Button size="sm" variant="outline" onClick={() => window.location.reload()}>

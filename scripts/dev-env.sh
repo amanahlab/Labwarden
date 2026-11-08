@@ -10,8 +10,8 @@ fi
 rand() { LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"; }
 umask 077
 cat >"$ENV" <<EOT
-VULNX_ADMIN_PASSWORD=$(rand 24)
-VULNX_INGEST_TOKEN=vx_$(rand 40)
-VULNX_PORT=8080
+LABWARDEN_ADMIN_PASSWORD=$(rand 24)
+LABWARDEN_INGEST_TOKEN=vx_$(rand 40)
+LABWARDEN_PORT=8080
 EOT
-echo "wrote $ENV (admin password: grep VULNX_ADMIN_PASSWORD .env)"
+echo "wrote $ENV (admin password: grep LABWARDEN_ADMIN_PASSWORD .env)"

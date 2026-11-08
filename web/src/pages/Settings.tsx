@@ -83,28 +83,28 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 
 function AgentSetup() {
   const url = window.location.origin
-  const vm = `curl -fsSL ${url}/install.sh | sudo VULNX_URL=${url} VULNX_TOKEN=<token> VULNX_GROUP=homelab sh`
-  const docker = `docker run -d --name vulnx-agent --restart unless-stopped \\
+  const vm = `curl -fsSL ${url}/install.sh | sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh`
+  const docker = `docker run -d --name labwarden-agent --restart unless-stopped \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro \\
-  -v vulnx-agent-db:/var/lib/vulnx \\
-  -e VULNX_URL=${url} -e VULNX_TOKEN=<token> \\
-  -e VULNX_HOST=$(hostname) -e VULNX_GROUP=homelab \\
-  vulnx-agent:latest`
+  -v labwarden-agent-db:/var/lib/labwarden \\
+  -e LABWARDEN_URL=${url} -e LABWARDEN_TOKEN=<token> \\
+  -e LABWARDEN_HOST=$(hostname) -e LABWARDEN_GROUP=homelab \\
+  labwarden-agent:latest`
   const compose = `services:
-  vulnx-agent:
-    image: vulnx-agent:latest   # built from agent/Dockerfile in the VulnX repo
+  labwarden-agent:
+    image: labwarden-agent:latest   # built from agent/Dockerfile in the LabWarden repo
     restart: unless-stopped
     environment:
-      VULNX_URL: ${url}
-      VULNX_TOKEN: <token>
-      VULNX_HOST: <host-name>      # name shown in the dashboard
-      VULNX_GROUP: homelab
-      VULNX_INTERVAL: "21600"    # seconds between scans
+      LABWARDEN_URL: ${url}
+      LABWARDEN_TOKEN: <token>
+      LABWARDEN_HOST: <host-name>      # name shown in the dashboard
+      LABWARDEN_GROUP: homelab
+      LABWARDEN_INTERVAL: "21600"    # seconds between scans
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - vulnx-agent-db:/var/lib/vulnx
+      - labwarden-agent-db:/var/lib/labwarden
 volumes:
-  vulnx-agent-db: {}`
+  labwarden-agent-db: {}`
   return (
     <Panel title="Connect a host" subtitle="The agent runs Grype locally and pushes compressed JSON reports, run status and logs to this dashboard.">
       <Tabs.Root defaultValue="vm" variant="enclosed" size="sm">
@@ -125,13 +125,13 @@ volumes:
               <CodeBlock code={vm} />
               <Text textStyle="xs" color="fg.muted">
                 It installs Grype, the agent script and a systemd timer (every 6 hours, randomized by 15 minutes, catches up after downtime). Without
-                systemd it uses cron. The first scan starts right away. Options: <Code size="sm">VULNX_SCAN_PATHS</Code>,{" "}
-                <Code size="sm">VULNX_SCHEDULE</Code>, <Code size="sm">VULNX_SCAN_DOCKER</Code>. Uninstall with{" "}
+                systemd it uses cron. The first scan starts right away. Options: <Code size="sm">LABWARDEN_SCAN_PATHS</Code>,{" "}
+                <Code size="sm">LABWARDEN_SCHEDULE</Code>, <Code size="sm">LABWARDEN_SCAN_DOCKER</Code>. Uninstall with{" "}
                 <Code size="sm">… | sudo sh -s -- --uninstall</Code>.
               </Text>
             </Step>
             <Step n={3} title="Check progress">
-              <CodeBlock code={"journalctl -u vulnx-agent -f      # systemd\ntail -f /var/log/vulnx-agent.log  # cron"} />
+              <CodeBlock code={"journalctl -u labwarden-agent -f      # systemd\ntail -f /var/log/labwarden-agent.log  # cron"} />
             </Step>
           </Stack>
         </Tabs.Content>
@@ -139,7 +139,7 @@ volumes:
           <Stack gap="3">
             <Text textStyle="sm" color="fg.muted">
               Scans the image of every running container through the Docker socket (read-only). Build the image once from the repository with{" "}
-              <Code size="sm">docker build -t vulnx-agent agent/</Code>.
+              <Code size="sm">docker build -t labwarden-agent agent/</Code>.
             </Text>
             <CodeBlock code={docker} />
             <Text textStyle="xs" color="fg.muted">
@@ -153,7 +153,7 @@ volumes:
         <Tabs.Content value="how">
           <Stack gap="2" textStyle="sm" color="fg.muted" maxW="3xl">
             <Text>
-              <b>Schedule.</b> VMs use a systemd timer (cron fallback). The Docker agent loops with a sleep of <Code size="sm">VULNX_INTERVAL</Code>. Each run
+              <b>Schedule.</b> VMs use a systemd timer (cron fallback). The Docker agent loops with a sleep of <Code size="sm">LABWARDEN_INTERVAL</Code>. Each run
               reports its interval, so hosts that stay silent for more than 2.5 intervals are flagged as <i>stale</i>.
             </Text>
             <Text>
@@ -341,7 +341,7 @@ function NotifyStatus({ n }: { n: SystemInfo["notify"] }) {
   if (!n.enabled)
     return (
       <Text color="fg.muted">
-        Off. Set <Code size="sm">VULNX_NOTIFY_URL</Code> to get alerts about new findings.
+        Off. Set <Code size="sm">LABWARDEN_NOTIFY_URL</Code> to get alerts about new findings.
       </Text>
     )
   return (
@@ -365,7 +365,7 @@ function SystemPanel() {
       {s && (
         <DataList.Root orientation="horizontal" size="sm">
           <DataList.Item>
-            <DataList.ItemLabel>VulnX</DataList.ItemLabel>
+            <DataList.ItemLabel>LabWarden</DataList.ItemLabel>
             <DataList.ItemValue>{s.version}</DataList.ItemValue>
           </DataList.Item>
           <DataList.Item>
@@ -377,7 +377,7 @@ function SystemPanel() {
                 </Badge>
               ) : (
                 <Badge colorPalette="red" variant="subtle" size="sm">
-                  Disabled: set VULNX_ADMIN_PASSWORD
+                  Disabled: set LABWARDEN_ADMIN_PASSWORD
                 </Badge>
               )}
             </DataList.ItemValue>

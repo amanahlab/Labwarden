@@ -1,4 +1,4 @@
-# Deliberately vulnerable pins for the VulnX testbed. Never install these anywhere real.
+# Deliberately vulnerable pins for the LabWarden testbed. Never install these anywhere real.
 Django==2.2.0
 requests==2.19.0
 PyYAML==5.3

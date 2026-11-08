@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/coronas2k/vulnx/server/internal/grype"
+	"github.com/amanahlab/labwarden/server/internal/grype"
 )
 
 func openTest(t *testing.T) *Store {

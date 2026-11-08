@@ -12,5 +12,5 @@ scripts/npm.sh run lint
 scripts/npm.sh run build
 echo "== shell"
 docker run --rm -v "$ROOT:/mnt:ro" -w /mnt koalaman/shellcheck:stable -s sh -S warning \
-  agent/vulnx-agent.sh agent/install.sh agent/docker/entrypoint.sh testbed/vm/entrypoint.sh scripts/*.sh
+  agent/labwarden-agent.sh agent/install.sh agent/docker/entrypoint.sh testbed/vm/entrypoint.sh scripts/*.sh
 echo "all checks passed"
