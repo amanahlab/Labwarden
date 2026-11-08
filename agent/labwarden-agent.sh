@@ -197,6 +197,7 @@ query_for() { # query_for <target-name> <duration-ms>
 # the background. Returns 2 when the server rejects the content itself (bad or
 # too large), which no retry can fix; 1 for anything worth retrying later.
 upload() {
+	: >"$WORK/resp.json" # curl -f writes no body on an error; never report the last success
 	_code=$(api "/api/v1/ingest/${3:-sbom}?$2" application/json "$1" -H "Content-Encoding: gzip" \
 		-o "$WORK/resp.json" -w '%{http_code}') && return 0
 	case "$_code" in 400 | 413 | 415 | 422) return 2 ;; esac
@@ -204,7 +205,8 @@ upload() {
 }
 
 rejected() { # rejected <what>: why the server refused the last upload
-	printf 'rejected %s (HTTP %s: %s)' "$1" "$_code" "$(head -c 300 "$WORK/resp.json" 2>/dev/null)"
+	_body=$(head -c 300 "$WORK/resp.json" 2>/dev/null)
+	printf 'rejected %s (HTTP %s%s)' "$1" "$_code" "${_body:+: $_body}"
 }
 
 # Re-send SBOMs that failed to upload on an earlier run. *.sbom.gz are SBOMs;
