@@ -127,7 +127,7 @@ func TestUpdateDBStagesSwapsAndCleansUp(t *testing.T) {
 	}
 	f.write("available", "true")
 
-	f.s.UpdateDB(context.Background())
+	f.s.UpdateDB(context.Background(), 0)
 
 	if got := f.live(); got != "2026-02-02T00:00:00Z" {
 		t.Fatalf("live DB = %q, want the new one", got)
@@ -159,7 +159,7 @@ func TestUpdateDBStagesSwapsAndCleansUp(t *testing.T) {
 
 func TestUpdateDBSkipsDownloadWhenCurrent(t *testing.T) {
 	f := newFake(t, "2026-01-01T00:00:00Z")
-	f.s.UpdateDB(context.Background())
+	f.s.UpdateDB(context.Background(), 0)
 	for _, c := range f.calls() {
 		if strings.HasSuffix(c, " db update") {
 			t.Fatalf("downloaded although the DB is current: %q", c)
@@ -172,7 +172,7 @@ func TestUpdateDBSkipsDownloadWhenCurrent(t *testing.T) {
 
 func TestUpdateDBDownloadsWhenMissing(t *testing.T) {
 	f := newFake(t, "")
-	f.s.UpdateDB(context.Background())
+	f.s.UpdateDB(context.Background(), 0)
 	if f.live() != "2026-02-02T00:00:00Z" || f.s.Status().DBBuilt == "" {
 		t.Fatal("DB not downloaded on first start")
 	}
@@ -185,7 +185,7 @@ func TestUpdateDBRunsOneAtATime(t *testing.T) {
 	f := newFake(t, "2026-01-01T00:00:00Z")
 	f.write("available", "true")
 	f.s.updating.Store(true) // another update is running
-	f.s.UpdateDB(context.Background())
+	f.s.UpdateDB(context.Background(), 0)
 	if f.live() != "2026-01-01T00:00:00Z" {
 		t.Fatal("a second update ran concurrently")
 	}
@@ -206,5 +206,22 @@ func TestSwapGivesUpRatherThanBlockingScans(t *testing.T) {
 	}
 	if f.live() != "2026-01-01T00:00:00Z" {
 		t.Fatal("live DB changed under a running scan")
+	}
+}
+
+func TestUpdateDBMaxAgeSkipsARecentDB(t *testing.T) {
+	recent := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	f := newFake(t, recent)
+	f.write("available", "true")
+	if updated, err := f.s.UpdateDB(context.Background(), 36*time.Hour); updated || err != nil {
+		t.Fatalf("updated=%v err=%v; a DB built an hour ago is recent enough", updated, err)
+	}
+	for _, c := range f.calls() {
+		if strings.Contains(c, " db check") || strings.Contains(c, " db update") {
+			t.Fatalf("checked although the DB is recent: %q", c)
+		}
+	}
+	if updated, err := f.s.UpdateDB(context.Background(), 0); !updated || err != nil {
+		t.Fatalf("updated=%v err=%v; without maxAge the newer DB is taken", updated, err)
 	}
 }

@@ -50,7 +50,7 @@ func setup(t *testing.T, withDB bool) (*Queue, *store.Store) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sc := scanner.New(bin, st, log)
 	sc.Init(context.Background())
-	if err := sc.UpdateDB(context.Background()); err != nil { // finds the fake DB
+	if _, err := sc.UpdateDB(context.Background(), 0); err != nil { // finds the fake DB
 		t.Fatal(err)
 	}
 	sb, err := sboms.New(filepath.Join(dir, "sboms"))
@@ -58,7 +58,7 @@ func setup(t *testing.T, withDB bool) (*Queue, *store.Store) {
 		t.Fatal(err)
 	}
 	q, err := Open(context.Background(), Config{Path: filepath.Join(dir, "queue.db"), ScanWorkers: 2,
-		Scheduler: true, DBUpdateEvery: time.Hour, SBOMs: sb}, st, sc, log)
+		Scheduler: true, DBUpdateAt: "03:00", SBOMs: sb}, st, sc, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,5 +171,59 @@ func TestSubmitSBOMRefusesWhenTheDiskIsFull(t *testing.T) {
 	_, err := q.SubmitSBOM(context.Background(), store.IngestMeta{Host: "vm1"}, strings.NewReader("{}"))
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("err = %v, want ErrBusy", err)
+	}
+}
+
+func TestRematchUsesTheStoredSBOMAndLeavesTheHostAlone(t *testing.T) {
+	q, st := setup(t, true)
+	ctx := context.Background()
+	if err := q.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m := store.IngestMeta{Host: "vm1", Kind: "vm", Target: "/", RunID: "r1", Source: "agent"}
+	if _, err := q.SubmitSBOM(ctx, m, strings.NewReader(`{"artifacts":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	scans := func() int {
+		l, err := st.ListScans(ctx, store.ScanFilter{}, store.Page{})
+		if err != nil {
+			return -1
+		}
+		return l.Total
+	}
+	waitFor(t, "first match", func() bool { ids, _ := st.LiveSBOMTargets(ctx); return len(ids) == 1 })
+	host := func() store.HostRow {
+		l, err := st.ListHosts(ctx, store.HostFilter{}, store.Page{})
+		if err != nil || len(l.Items) != 1 {
+			t.Fatalf("hosts: %v %v", l, err)
+		}
+		return l.Items[0]
+	}
+	before := host()
+	time.Sleep(1100 * time.Millisecond) // last_seen has second precision
+
+	n, err := q.enqueueRematches(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("queued %d re-matches, err %v; want 1", n, err)
+	}
+	waitFor(t, "re-match scan", func() bool { return scans() == 2 })
+	if after := host(); after.LastSeen != before.LastSeen {
+		t.Fatalf("re-match moved last_seen from %s to %s", before.LastSeen, after.LastSeen)
+	}
+}
+
+func TestDailyAt(t *testing.T) {
+	sched, err := DailyAt("03:30")
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2026, 11, 8, 4, 0, 0, 0, time.Local)
+	if got, want := sched.Next(from), time.Date(2026, 11, 9, 3, 30, 0, 0, time.Local); !got.Equal(want) {
+		t.Fatalf("next = %s, want %s", got, want)
+	}
+	for _, bad := range []string{"", "3", "25:00", "03:60", "* * * * *"} {
+		if _, err := DailyAt(bad); err == nil {
+			t.Errorf("DailyAt(%q) accepted", bad)
+		}
 	}
 }

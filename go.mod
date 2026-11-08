@@ -7,6 +7,7 @@ require (
 	github.com/riverqueue/river v0.51.1
 	github.com/riverqueue/river/riverdriver/riversqlite v0.51.1
 	github.com/riverqueue/river/rivertype v0.51.1
+	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.62.0
 )
 

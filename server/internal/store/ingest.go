@@ -26,6 +26,9 @@ type IngestMeta struct {
 	Source       string // agent | server
 	RunID        string
 	DurationMS   int64
+	// Rematch marks a re-match of a stored SBOM: the host was not heard
+	// from, so its last_seen stays.
+	Rematch bool `json:"-"`
 }
 
 type IngestResult struct {
@@ -243,9 +246,9 @@ func upsertHost(ctx context.Context, tx *sql.Tx, m IngestMeta, ts string) (int64
 		  ip=CASE WHEN excluded.ip <> '' THEN excluded.ip ELSE hosts.ip END,
 		  agent_version=CASE WHEN excluded.agent_version <> '' THEN excluded.agent_version ELSE hosts.agent_version END,
 		  interval_sec=CASE WHEN excluded.interval_sec > 0 THEN excluded.interval_sec ELSE hosts.interval_sec END,
-		  last_seen=excluded.last_seen
+		  last_seen=CASE WHEN ? THEN hosts.last_seen ELSE excluded.last_seen END
 		RETURNING id`,
-		m.Host, kind, grp, m.OS, m.Arch, m.IP, m.AgentVersion, m.IntervalSec, ts, ts).Scan(&id)
+		m.Host, kind, grp, m.OS, m.Arch, m.IP, m.AgentVersion, m.IntervalSec, ts, ts, m.Rematch).Scan(&id)
 	return id, err
 }
 

@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -41,8 +42,12 @@ func (w *centralScanWorker) Work(ctx context.Context, job *river.Job[CentralScan
 	return w.sc.ScanCentral(ctx, job.Args.TargetID)
 }
 
-// DBUpdateArgs checks for a new vulnerability DB and swaps it in.
-type DBUpdateArgs struct{}
+// DBUpdateArgs checks for a new vulnerability DB and swaps it in, then
+// queues a re-match of every stored SBOM against it. With MaxAge set it does
+// nothing while the live DB is younger than that.
+type DBUpdateArgs struct {
+	MaxAge time.Duration `json:"max_age,omitempty"`
+}
 
 func (DBUpdateArgs) Kind() string { return "db_update" }
 
@@ -53,14 +58,99 @@ func (DBUpdateArgs) InsertOpts() river.InsertOpts {
 
 type dbUpdateWorker struct {
 	river.WorkerDefaults[DBUpdateArgs]
-	sc *scanner.Scanner
+	q *Queue
 }
 
 // Above the 30 minute download limit in scanner.UpdateDB.
 func (w *dbUpdateWorker) Timeout(*river.Job[DBUpdateArgs]) time.Duration { return 35 * time.Minute }
 
-func (w *dbUpdateWorker) Work(ctx context.Context, _ *river.Job[DBUpdateArgs]) error {
-	return w.sc.UpdateDB(ctx)
+func (w *dbUpdateWorker) Work(ctx context.Context, job *river.Job[DBUpdateArgs]) error {
+	updated, err := w.q.sc.UpdateDB(ctx, job.Args.MaxAge)
+	if err != nil || !updated {
+		return err
+	}
+	n, err := w.q.enqueueRematches(ctx)
+	if err != nil {
+		return fmt.Errorf("queue re-matches: %w", err)
+	}
+	if n > 0 {
+		w.q.event(ctx, "info", store.IngestMeta{}, fmt.Sprintf("re-matching %d targets against the new DB", n))
+	}
+	return nil
+}
+
+// RematchArgs matches a target's latest stored SBOM against the current DB,
+// so new vulnerabilities show up without waiting for the agent.
+type RematchArgs struct {
+	TargetID int64 `json:"target_id" river:"unique"`
+}
+
+func (RematchArgs) Kind() string { return "rematch" }
+
+// Behind fresh uploads and central scans: a re-match is never urgent.
+func (RematchArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueScan, Priority: 4, MaxAttempts: 3,
+		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: pendingStates}}
+}
+
+type rematchWorker struct {
+	river.WorkerDefaults[RematchArgs]
+	q *Queue
+}
+
+func (w *rematchWorker) Timeout(*river.Job[RematchArgs]) time.Duration { return 10 * time.Minute }
+
+func (w *rematchWorker) Work(ctx context.Context, job *river.Job[RematchArgs]) error {
+	if !w.q.sc.HasDB() {
+		return river.JobSnooze(noDBSnooze)
+	}
+	sha, m, err := w.q.st.TargetSBOM(ctx, job.Args.TargetID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil // target deleted since
+	}
+	if err != nil {
+		return err
+	}
+	path, err := w.q.sboms.Extract(sha)
+	if err != nil {
+		return fmt.Errorf("sbom of %s/%s: %w", m.Host, m.Target, err)
+	}
+	defer os.Remove(path)
+	m.Rematch, m.RunID, m.DurationMS = true, "", 0
+	if _, err := w.q.sc.MatchSBOM(ctx, m, path); err != nil {
+		return fmt.Errorf("re-match %s/%s: %w", m.Host, m.Target, err)
+	}
+	return nil
+}
+
+// SBOMGCArgs deletes stored SBOMs that no target references any more.
+type SBOMGCArgs struct{}
+
+func (SBOMGCArgs) Kind() string { return "sbom_gc" }
+
+func (SBOMGCArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueMaint, MaxAttempts: 1,
+		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: pendingStates}}
+}
+
+type sbomGCWorker struct {
+	river.WorkerDefaults[SBOMGCArgs]
+	q *Queue
+}
+
+func (w *sbomGCWorker) Work(ctx context.Context, _ *river.Job[SBOMGCArgs]) error {
+	if w.q.sboms == nil {
+		return nil
+	}
+	keep, err := w.q.st.SBOMRefs(ctx)
+	if err != nil {
+		return err
+	}
+	n, err := w.q.sboms.GC(keep, sbomGrace)
+	if n > 0 {
+		w.q.log.Info("deleted unreferenced SBOMs", "count", n)
+	}
+	return err
 }
 
 // ScheduleArgs queues every central target that is due.

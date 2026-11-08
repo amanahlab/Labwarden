@@ -70,14 +70,21 @@ func (s *Scanner) refreshDBStatus(ctx context.Context) {
 	s.status.DBBuilt, s.status.DBSchema = ds.Built, ds.SchemaVersion
 }
 
-// UpdateDB downloads a new DB if one is available and swaps it in. Only one
-// runs at a time; a second call while one is running returns at once.
-func (s *Scanner) UpdateDB(ctx context.Context) error {
+// UpdateDB downloads a new DB if one is available and swaps it in, and
+// reports whether it did. With maxAge > 0 it does nothing while the live DB
+// was built less than maxAge ago. Only one runs at a time; a second call while
+// one is running returns at once.
+func (s *Scanner) UpdateDB(ctx context.Context, maxAge time.Duration) (bool, error) {
 	if !s.Status().Available || !s.updating.CompareAndSwap(false, true) {
-		return nil
+		return false, nil
 	}
 	defer s.updating.Store(false)
 	s.refreshDBStatus(ctx) // decides between checking for an update and a first download
+	if maxAge > 0 {
+		if t, err := time.Parse(time.RFC3339, s.Status().DBBuilt); err == nil && time.Since(t) < maxAge {
+			return false, nil
+		}
+	}
 	built, err := s.downloadDB(ctx)
 	s.mu.Lock()
 	s.status.DBChecked = time.Now().UTC().Format(time.RFC3339)
@@ -88,13 +95,13 @@ func (s *Scanner) UpdateDB(ctx context.Context) error {
 	s.mu.Unlock()
 	if err != nil {
 		s.event(ctx, "error", "", "grype DB update failed: "+trim(err.Error(), 1000))
-		return err
+		return false, err
 	}
 	s.refreshDBStatus(ctx)
 	if built != "" {
 		s.event(ctx, "info", "", "grype vulnerability DB updated (built "+built+")")
 	}
-	return nil
+	return built != "", nil
 }
 
 // downloadDB returns the new DB's build date, or "" when the live DB is current.

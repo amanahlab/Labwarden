@@ -58,7 +58,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 	}
 	// The queue is never started, so uploads stay queued: MaxQueued is reachable.
 	q, err := jobs.Open(context.Background(), jobs.Config{Path: filepath.Join(t.TempDir(), "queue.db"),
-		DBUpdateEvery: time.Hour, SBOMs: sb, MaxQueued: testMaxQueued}, st, sc, log)
+		DBUpdateAt: "03:00", SBOMs: sb, MaxQueued: testMaxQueued}, st, sc, log)
 	if err != nil {
 		t.Fatal(err)
 	}

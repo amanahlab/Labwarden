@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+	_ "time/tzdata" // TZ works in images without zoneinfo
 
 	"github.com/amanahlab/labwarden/agent"
 	"github.com/amanahlab/labwarden/server/internal/api"
@@ -91,13 +92,13 @@ func run(log *slog.Logger) error {
 	workers, _ := strconv.Atoi(env("LABWARDEN_SCAN_WORKERS", "2"))
 	maxQueued, _ := strconv.Atoi(env("LABWARDEN_QUEUE_MAX", "1000"))
 	q, err := jobs.Open(ctx, jobs.Config{
-		Path:          filepath.Join(dataDir, "queue.db"),
-		ScanWorkers:   workers,
-		Scheduler:     env("LABWARDEN_SCHEDULER", "true") == "true",
-		DBUpdateEvery: 6 * time.Hour,
-		SBOMs:         sb,
-		MaxQueued:     maxQueued,
-		MinFreeBytes:  1 << 30,
+		Path:         filepath.Join(dataDir, "queue.db"),
+		ScanWorkers:  workers,
+		Scheduler:    env("LABWARDEN_SCHEDULER", "true") == "true",
+		DBUpdateAt:   env("LABWARDEN_DB_UPDATE_AT", "03:00"),
+		SBOMs:        sb,
+		MaxQueued:    maxQueued,
+		MinFreeBytes: 1 << 30,
 	}, st, sc, log)
 	if err != nil {
 		return err

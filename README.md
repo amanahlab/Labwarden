@@ -53,7 +53,7 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
 | **VMs** | `install.sh` installs Grype, the agent and a **systemd timer** (`OnCalendar` every 6h, `RandomizedDelaySec=15m`, `Persistent=true` so missed runs catch up). Without systemd (Alpine, containers) it writes `/etc/cron.d/labwarden-agent` at a random minute. A lock prevents overlapping runs. |
 | **Docker hosts** | The `labwarden-agent` container runs the agent, then sleeps `LABWARDEN_INTERVAL` seconds, in a loop. It lists running containers through the read-only Docker socket and scans each distinct image. If a tag was moved by a rebuild, it scans the image actually running. If that image was already deleted, it scans the container filesystem. `LABWARDEN_DOCKER_LABEL` limits scanning to labelled containers. |
 | **Registry images** | Added in Settings. The server's scheduler scans `registry:<ref>` every N minutes, with no agent involved. |
-| **Grype DB** | Each agent runs `grype db update` before scanning. The server updates its own DB every 6 hours. |
+| **Grype DB** | Each agent runs `grype db update` before scanning. The server checks for a new DB once a day at `LABWARDEN_DB_UPDATE_AT`. |
 
 ### How reports and logs are shipped
 
@@ -105,7 +105,9 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 | `LABWARDEN_SCAN_WORKERS` | `2` | Grype processes run at once (about 115 MB each) |
 | `LABWARDEN_QUEUE_MAX` | `1000` | Queued jobs above which SBOM uploads get `503` and stay in the agent's spool |
 | `LABWARDEN_EVENT_RETENTION` | `50000` | Number of log events kept |
-| `LABWARDEN_SCHEDULER` | `true` | Central registry scans and DB updates |
+| `LABWARDEN_SCHEDULER` | `true` | Central registry scans |
+| `LABWARDEN_DB_UPDATE_AT` | `03:00` | Daily time (`HH:MM`, in `TZ`) to check for a new Grype DB. After a new one, every stored SBOM is matched again, so new CVEs show up without an agent run. On start the DB is only checked when it is missing or older than 36 hours. |
+| `TZ` | `UTC` | Time zone for `LABWARDEN_DB_UPDATE_AT`, e.g. `Europe/Amsterdam` |
 | `LABWARDEN_NOTIFY_URL` | *(empty: off)* | Webhook for alerts. Never logged or shown in the UI. |
 | `LABWARDEN_NOTIFY_FORMAT` | `json` | `json` posts `{title, text, content, message, host, target, link, findings}`. `ntfy` posts plain text with ntfy headers. |
 | `LABWARDEN_NOTIFY_MIN_SEVERITY` | `Critical` | `Critical`, `High`, `Medium` or `Low` |

@@ -22,6 +22,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riversqlite"
 	"github.com/riverqueue/river/rivermigrate"
 	"github.com/riverqueue/river/rivertype"
+	"github.com/robfig/cron/v3"
 	_ "modernc.org/sqlite"
 
 	"github.com/amanahlab/labwarden/server/internal/sboms"
@@ -38,6 +39,14 @@ const (
 	// pickup of about 100 ms on a homelab box; the cost is an indexed query.
 	pollInterval = 100 * time.Millisecond
 
+	// At startup the DB is only checked when it is older than this, so a
+	// restart does not download in the middle of the day.
+	dbStartupMaxAge = 36 * time.Hour
+
+	// Uploaded SBOMs nobody references are kept this long, well past the
+	// lifetime of any job that might still read one.
+	sbomGrace = 72 * time.Hour
+
 	// No DB known yet: right after startup until the first db_update has read
 	// the DB's status, or on first start until the download finishes.
 	noDBSnooze = 15 * time.Second
@@ -51,13 +60,13 @@ var pendingStates = []rivertype.JobState{
 }
 
 type Config struct {
-	Path          string        // queue.db
-	ScanWorkers   int           // concurrent grype processes
-	Scheduler     bool          // queue due central targets every minute
-	DBUpdateEvery time.Duration // how often to check for a new vulnerability DB
-	SBOMs         *sboms.Files  // uploaded SBOMs
-	MaxQueued     int           // SubmitSBOM refuses work beyond this backlog
-	MinFreeBytes  uint64        // SubmitSBOM refuses uploads when the SBOM disk has less free
+	Path         string       // queue.db
+	ScanWorkers  int          // concurrent grype processes
+	Scheduler    bool         // queue due central targets every minute
+	DBUpdateAt   string       // daily "HH:MM" in the server's time zone (TZ) to check for a new vulnerability DB
+	SBOMs        *sboms.Files // uploaded SBOMs
+	MaxQueued    int          // SubmitSBOM refuses work beyond this backlog
+	MinFreeBytes uint64       // SubmitSBOM refuses uploads when the SBOM disk has less free
 }
 
 // ErrBusy means the server is not taking uploads right now; the agent keeps
@@ -94,17 +103,27 @@ func Open(ctx context.Context, cfg Config, st *store.Store, sc *scanner.Scanner,
 		return nil, fmt.Errorf("migrate queue: %w", err)
 	}
 
+	daily, err := DailyAt(cfg.DBUpdateAt)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
 	q := &Queue{cfg: cfg, db: db, st: st, sc: sc, sboms: cfg.SBOMs, log: log}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &centralScanWorker{sc: sc})
-	river.AddWorker(workers, &dbUpdateWorker{sc: sc})
+	river.AddWorker(workers, &dbUpdateWorker{q: q})
+	river.AddWorker(workers, &rematchWorker{q: q})
+	river.AddWorker(workers, &sbomGCWorker{q: q})
 	river.AddWorker(workers, &scheduleWorker{q: q})
 	river.AddWorker(workers, &matchSBOMWorker{q: q})
 
 	periodic := []*river.PeriodicJob{
-		river.NewPeriodicJob(river.PeriodicInterval(cfg.DBUpdateEvery),
+		river.NewPeriodicJob(daily,
 			func() (river.JobArgs, *river.InsertOpts) { return DBUpdateArgs{}, nil },
-			&river.PeriodicJobOpts{ID: "db_update", RunOnStart: true}),
+			&river.PeriodicJobOpts{ID: "db_update"}),
+		river.NewPeriodicJob(river.PeriodicInterval(24*time.Hour),
+			func() (river.JobArgs, *river.InsertOpts) { return SBOMGCArgs{}, nil },
+			&river.PeriodicJobOpts{ID: "sbom_gc", RunOnStart: true}),
 	}
 	if cfg.Scheduler {
 		periodic = append(periodic, river.NewPeriodicJob(river.PeriodicInterval(time.Minute),
@@ -134,7 +153,25 @@ func Open(ctx context.Context, cfg Config, st *store.Store, sc *scanner.Scanner,
 	return q, nil
 }
 
-func (q *Queue) Start(ctx context.Context) error { return q.client.Start(ctx) }
+// DailyAt parses "HH:MM" into a schedule that fires once a day at that local
+// time; TZ sets the zone.
+func DailyAt(hhmm string) (cron.Schedule, error) {
+	t, err := time.Parse("15:04", hhmm)
+	if err != nil {
+		return nil, fmt.Errorf("daily time %q: want HH:MM", hhmm)
+	}
+	return cron.ParseStandard(fmt.Sprintf("%d %d * * *", t.Minute(), t.Hour()))
+}
+
+// Start runs the workers. It also queues a DB update that only downloads
+// when there is no DB yet or it missed a daily update.
+func (q *Queue) Start(ctx context.Context) error {
+	if err := q.client.Start(ctx); err != nil {
+		return err
+	}
+	_, err := q.client.Insert(ctx, DBUpdateArgs{MaxAge: dbStartupMaxAge}, nil)
+	return err
+}
 
 // Stop waits for running jobs until ctx ends, then cancels them; unfinished
 // jobs run again after the next start.
@@ -155,6 +192,20 @@ func (q *Queue) EnqueueCentral(ctx context.Context, id int64) (bool, error) {
 		return false, err
 	}
 	return !res.UniqueSkippedAsDuplicate, nil
+}
+
+// enqueueRematches queues a re-match of every live target with a stored SBOM.
+func (q *Queue) enqueueRematches(ctx context.Context) (int, error) {
+	ids, err := q.st.LiveSBOMTargets(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if _, err := q.client.Insert(ctx, RematchArgs{TargetID: id}, nil); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
 }
 
 // EnqueueDBUpdate queues a DB update; false if one is already pending.
