@@ -32,10 +32,32 @@ printf '{"password":"%s"}' "$LABWARDEN_ADMIN_PASSWORD" | api -o /dev/null -H 'Co
 pass "admin login"
 
 host_id() { api "$URL/api/v1/hosts?q=$1" | jqr -e --arg n "$1" '.items[] | select(.name == $n and .total > 0) | .id'; }
-wait_for 900 "testbed-vm reported findings" host_id testbed-vm
-# Don't wait for the 15-minute loop: run the docker agent now (a no-op if a run is in progress).
-docker compose --profile testbed exec -T testbed-docker-agent labwarden-agent >/dev/null 2>&1 || true
-wait_for 900 "testbed-docker reported findings" host_id testbed-docker
+
+echo "== agents send SBOMs, the server matches them"
+# The VM keeps the agent it installed first; re-running install.sh is how a real host upgrades.
+docker compose --profile testbed exec -T testbed-vm sh -c 'curl -fsSL "$LABWARDEN_URL/install.sh" | LABWARDEN_RUN_NOW=0 sh' >/dev/null ||
+  fail "upgrade of the testbed-vm agent"
+pass "testbed-vm agent upgraded with install.sh"
+matched_since() { # matched_since <host> <time>: a server-side match received after <time>
+  api "$URL/api/v1/scans?q=$1&source=server&size=50" |
+    jqr -e --arg h "$1" --arg t "$2" '[.items[] | select(.host_name == $h and .received_at >= $t)] | length > 0'
+}
+agent_matched_within() { # agent_matched_within <seconds> <service:host>: run the agent, wait for its match
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  out=$(docker compose --profile testbed exec -T "${2%%:*}" labwarden-agent 2>&1) || true
+  case "$out" in
+  *"another labwarden-agent run"*) wait_for 900 "${2#*:} SBOM matched (scheduled run)" matched_since "${2#*:}" "$since" ;;
+  *"uploaded "*) wait_for "$1" "${2#*:} SBOM matched within $1 s of upload" matched_since "${2#*:}" "$since" ;;
+  *) printf '%s\n' "$out" | tail -n 20 >&2; fail "${2#*:} agent run uploaded nothing" ;;
+  esac
+}
+# Right after a (re)start grype pages its 3.4 GB DB in from disk, so the first
+# matches are slow (up to ~25 s for the VM); the 15 s bound is for a warm server.
+agent_matched_within 120 testbed-vm:testbed-vm
+agent_matched_within 120 testbed-docker-agent:testbed-docker
+agent_matched_within 15 testbed-vm:testbed-vm
+wait_for 60 "testbed-vm reported findings" host_id testbed-vm
+wait_for 60 "testbed-docker reported findings" host_id testbed-docker
 
 has_vuln() { # has_vuln <query> <jq filter on items>
   api "$URL/api/v1/vulnerabilities?q=$1&status=all&size=100" | jqr -e "[.items[] | $2] | any" >/dev/null || fail "expected $1 ($2)"
@@ -86,6 +108,15 @@ docker compose --profile testbed stop testbed-workload >/dev/null
 wait_for 300 "workload image retired after it stopped running" workload_retired true
 docker compose --profile testbed start testbed-workload >/dev/null
 wait_for 300 "workload image back after it started again" workload_retired false
+
+echo "== one vulnerability DB"
+for svc in testbed-vm testbed-docker-agent; do
+  docker compose --profile testbed exec -T "$svc" test ! -e /var/lib/labwarden/grype-db || fail "$svc still has a local grype DB"
+done
+pass "agents keep no grype DB"
+dbdirs=$(docker compose exec -T labwarden sh -c 'ls -A /data/grype-db')
+[ "$dbdirs" = "6" ] || fail "server grype-db holds: $(echo $dbdirs)"
+pass "server holds exactly one grype DB (no download leftovers)"
 
 echo "== logs"
 api "$URL/api/v1/events?source=agent&size=1" | jqr -e '.total > 0' >/dev/null || fail "no agent events"

@@ -1,6 +1,6 @@
 # LabWarden
 
-A homelab vulnerability dashboard. Agents on your VMs and Docker hosts run [Grype](https://github.com/anchore/grype) on a schedule and push the reports to one central server. The server stores them, tracks what is new or fixed, and shows everything in a web UI.
+A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog their packages with [Syft](https://github.com/anchore/syft) on a schedule and push the SBOMs to one central server. The server matches them with [Grype](https://github.com/anchore/grype) against the only copy of the vulnerability DB, tracks what is new or fixed, and shows everything in a web UI. When a new DB arrives each night, every stored SBOM is matched again.
 
 - **Overview**: critical/high counts, known exploited (CISA KEV), fix availability, a 7/30/90-day trend, the riskiest hosts and the top vulnerabilities.
 - **Vulnerabilities**: one row per CVE/GHSA or per package instance. Search, sort, filter by severity, KEV, fix state, triage status, group and ecosystem. Paginated, with CSV export.
@@ -32,9 +32,10 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
  VM (systemd timer / cron)          Docker host (agent container)        Dashboard container
  ┌──────────────────────┐           ┌──────────────────────────┐        ┌────────────────────────────┐
  │ labwarden-agent.sh   │           │ labwarden-agent.sh (loop)│        │ Go server (chi)            │
- │  grype dir:/  ───────┼── gzip ──▶│  grype docker:<image> ───┼──────▶ │  /api/v1/ingest/* (token)  │
- │  spool on failure    │   JSON    │  via /var/run/docker.sock│        │  SQLite (WAL)              │
- └──────────────────────┘           └──────────────────────────┘        │  central grype: registry:  │
+ │  syft dir:/   ───────┼── gzip ──▶│  syft docker:<image>  ───┼──────▶ │  /api/v1/ingest/* (token)  │
+ │  spool on failure    │   SBOM    │  via /var/run/docker.sock│        │  job queue (River, SQLite) │
+ └──────────────────────┘           └──────────────────────────┘        │  grype sbom: + grype DB    │
+                                                                        │  SQLite (WAL), SBOM files  │
                                                                         │  React UI (Chakra UI v3)   │
                                                                         └────────────────────────────┘
 ```
@@ -43,24 +44,25 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
 |---|---|
 | Server | Go 1.27, chi, modernc SQLite (pure Go, no CGO), single static binary with the UI embedded |
 | UI | React 19, Vite, Chakra UI v3, TanStack Query, Recharts |
-| Agent | POSIX `sh`, needs only `curl`, `gzip` and `grype` |
+| Agent | POSIX `sh`, needs only `curl`, `gzip` and `syft` (pinned `v1.57.0`, bumped together with Grype) |
 | Image | Alpine with the pinned Grype binary, non-root, health-checked |
+| Jobs | [River](https://riverqueue.com) on its own SQLite file (`queue.db`): SBOM matching, central scans, re-matches, the daily DB update |
 
 ### How scans are scheduled
 
 | Where | Mechanism |
 |---|---|
-| **VMs** | `install.sh` installs Grype, the agent and a **systemd timer** (`OnCalendar` every 6h, `RandomizedDelaySec=15m`, `Persistent=true` so missed runs catch up). Without systemd (Alpine, containers) it writes `/etc/cron.d/labwarden-agent` at a random minute. A lock prevents overlapping runs. |
-| **Docker hosts** | The `labwarden-agent` container runs the agent, then sleeps `LABWARDEN_INTERVAL` seconds, in a loop. It lists running containers through the read-only Docker socket and scans each distinct image. If a tag was moved by a rebuild, it scans the image actually running. If that image was already deleted, it scans the container filesystem. `LABWARDEN_DOCKER_LABEL` limits scanning to labelled containers. |
+| **VMs** | `install.sh` installs Syft, the agent and a **systemd timer** (`OnCalendar` every 6h, `RandomizedDelaySec=15m`, `Persistent=true` so missed runs catch up). Without systemd (Alpine, containers) it writes `/etc/cron.d/labwarden-agent` at a random minute. A lock prevents overlapping runs. |
+| **Docker hosts** | The `labwarden-agent` container runs the agent, then sleeps `LABWARDEN_INTERVAL` seconds, in a loop. It lists running containers through the read-only Docker socket and catalogs each distinct image. If a tag was moved by a rebuild, it scans the image actually running. If that image was already deleted, it scans the container filesystem. `LABWARDEN_DOCKER_LABEL` limits scanning to labelled containers. |
 | **Registry images** | Added in Settings. The server's scheduler scans `registry:<ref>` every N minutes, with no agent involved. |
-| **Grype DB** | Each agent runs `grype db update` before scanning. The server checks for a new DB once a day at `LABWARDEN_DB_UPDATE_AT`. |
+| **Grype DB** | Only the server has it (about 3.4 GB). It checks for a new one once a day at `LABWARDEN_DB_UPDATE_AT`, downloads it next to the live copy and swaps it in, so there is never a second download and scans never wait. A new DB queues a re-match of every stored SBOM. Agents need no DB and no internet access. |
 
-### How reports and logs are shipped
+### How SBOMs and logs are shipped
 
 1. `POST /api/v1/ingest/run` with `status=started` reports host facts (OS, arch, IP, agent version, interval).
-2. For each target, the agent runs `grype -o json`, gzips the output and sends `POST /api/v1/ingest/report?host=…&target=…` with `Content-Encoding: gzip`. If the upload fails, the report goes to a local spool (`/var/lib/labwarden/spool`, at most 20 reports) and is re-sent on the next run.
-   Agents that send a Syft JSON SBOM instead use `POST /api/v1/ingest/sbom` with the same parameters. The server stores the SBOM, answers `202 {queued, job_id}` at once and matches it on its job queue; a retry of the same run and target is not matched twice. It answers `503` when the queue is backed up or less than 1 GB of disk is free.
-3. Warnings and errors go to `POST /api/v1/ingest/event` and show up under **Logs**. These include Grype failures, DB update problems and uploads that never arrive.
+2. For each target, the agent runs `syft -o syft-json`, gzips the output and sends `POST /api/v1/ingest/sbom?host=…&target=…` with `Content-Encoding: gzip`. The server stores the SBOM, answers `202 {queued, job_id}` at once and matches it on its job queue, usually within seconds; a retry of the same run and target is not matched twice. It answers `503` when the queue is backed up or less than 1 GB of disk is free. If the upload fails, the SBOM goes to a local spool (`/var/lib/labwarden/spool`, at most 20) and is re-sent on the next run.
+   `POST /api/v1/ingest/report` still takes a Grype JSON report, for agents before 2.0. The server keeps the latest SBOM of every target, i.e. each host's full package list.
+3. Warnings and errors go to `POST /api/v1/ingest/event` and show up under **Logs**. These include Syft failures and uploads that never arrive.
 4. `POST /api/v1/ingest/run` with `status=ok|error` closes the run with the list of targets. On a successful run, targets the agent no longer reports (for example a removed container) are **retired** from the dashboard.
 
 A host that misses more than 2.5× its reported interval is marked **stale**. A host whose last run ended in error is marked **failing**. All agent requests use `Authorization: Bearer <token>`. Tokens are created in Settings and stored only as SHA-256 hashes.

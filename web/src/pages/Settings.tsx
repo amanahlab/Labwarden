@@ -106,7 +106,7 @@ function AgentSetup() {
 volumes:
   labwarden-agent-db: {}`
   return (
-    <Panel title="Connect a host" subtitle="The agent runs Grype locally and pushes compressed JSON reports, run status and logs to this dashboard.">
+    <Panel title="Connect a host" subtitle="The agent catalogs packages with Syft and pushes compressed SBOMs, run status and logs to this dashboard, which matches them against its vulnerability DB.">
       <Tabs.Root defaultValue="vm" variant="enclosed" size="sm">
         <Tabs.List>
           <Tabs.Trigger value="vm">Linux VM</Tabs.Trigger>
@@ -124,7 +124,7 @@ volumes:
             <Step n={2} title="Run the installer as root">
               <CodeBlock code={vm} />
               <Text textStyle="xs" color="fg.muted">
-                It installs Grype, the agent script and a systemd timer (every 6 hours, randomized by 15 minutes, catches up after downtime). Without
+                It installs Syft, the agent script and a systemd timer (every 6 hours, randomized by 15 minutes, catches up after downtime). Without
                 systemd it uses cron. The first scan starts right away. Options: <Code size="sm">LABWARDEN_SCAN_PATHS</Code>,{" "}
                 <Code size="sm">LABWARDEN_SCHEDULE</Code>, <Code size="sm">LABWARDEN_SCAN_DOCKER</Code>. Uninstall with{" "}
                 <Code size="sm">… | sudo sh -s -- --uninstall</Code>.
@@ -157,16 +157,17 @@ volumes:
               reports its interval, so hosts that stay silent for more than 2.5 intervals are flagged as <i>stale</i>.
             </Text>
             <Text>
-              <b>Reports.</b> Grype JSON is gzipped and POSTed to <Code size="sm">/api/v1/ingest/report</Code> with a bearer token. If the dashboard is
-              unreachable, the report is kept in a local spool and re-sent on the next run.
+              <b>SBOMs.</b> Syft JSON is gzipped and POSTed to <Code size="sm">/api/v1/ingest/sbom</Code> with a bearer token. The dashboard queues it
+              and matches it within seconds. If the dashboard is unreachable or busy, the SBOM is kept in a local spool and re-sent on the next run.
             </Text>
             <Text>
-              <b>Logs.</b> The run start and end go to <Code size="sm">/api/v1/ingest/run</Code>. Warnings and errors (Grype failures, DB update problems,
+              <b>Logs.</b> The run start and end go to <Code size="sm">/api/v1/ingest/run</Code>. Warnings and errors (Syft failures,
               upload failures) go to <Code size="sm">/api/v1/ingest/event</Code> and appear under Logs. A run that ends in error marks the host as{" "}
               <i>failing</i>.
             </Text>
             <Text>
-              <b>Central scanning.</b> Registry images listed below are scanned by the dashboard itself, which also keeps its own Grype DB up to date.
+              <b>One vulnerability DB.</b> Only the dashboard downloads the Grype DB, once a day. After each new DB it matches every stored SBOM again, so
+              new CVEs show up without waiting for the agents. Registry images listed below are scanned by the dashboard itself.
             </Text>
           </Stack>
         </Tabs.Content>

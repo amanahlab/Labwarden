@@ -7,11 +7,12 @@
 #           LABWARDEN_SCHEDULE (systemd OnCalendar, default every 6h),
 #           LABWARDEN_CRON (cron expression used when systemd is absent),
 #           LABWARDEN_INTERVAL (seconds; must match the schedule, default 21600),
-#           GRYPE_VERSION (default pinned below), LABWARDEN_RUN_NOW=0 to skip the first scan.
+#           SYFT_VERSION (default pinned below), LABWARDEN_RUN_NOW=0 to skip the first scan.
 # Uninstall: curl -fsSL .../install.sh | sudo sh -s -- --uninstall
 set -eu
 
-GRYPE_VERSION=${GRYPE_VERSION:-v0.121.2}
+# Bump together with the server's GRYPE_VERSION.
+SYFT_VERSION=${SYFT_VERSION:-v1.57.0}
 BIN=/usr/local/bin/labwarden-agent
 CONF_DIR=/etc/labwarden
 UNIT_DIR=/etc/systemd/system
@@ -31,7 +32,7 @@ if [ "${1:-}" = "--uninstall" ]; then
 	fi
 	rm -f /etc/cron.d/labwarden-agent "$BIN"
 	rm -rf "$CONF_DIR"
-	say "agent removed (grype and /var/lib/labwarden were left in place)"
+	say "agent removed (syft and /var/lib/labwarden were left in place)"
 	exit 0
 fi
 
@@ -42,12 +43,17 @@ LABWARDEN_URL=${LABWARDEN_URL%/}
 command -v curl >/dev/null 2>&1 || die "curl is required"
 command -v gzip >/dev/null 2>&1 || die "gzip is required"
 
-# 1. grype
-if command -v grype >/dev/null 2>&1; then
-	say "grype already installed: $(grype version 2>/dev/null | awk '/^Version:/{print $2}')"
+# 1. syft (the dashboard holds the vulnerability DB; agents only catalog packages)
+if command -v syft >/dev/null 2>&1 && [ "v$(syft version 2>/dev/null | awk '/^Version:/{print $2}')" = "$SYFT_VERSION" ]; then
+	say "syft $SYFT_VERSION already installed"
 else
-	say "installing grype $GRYPE_VERSION"
-	curl -fsSL https://get.anchore.io/grype | sh -s -- -b /usr/local/bin "$GRYPE_VERSION"
+	say "installing syft $SYFT_VERSION"
+	curl -fsSL https://get.anchore.io/syft | sh -s -- -b /usr/local/bin "$SYFT_VERSION"
+fi
+# Agents before 2.0 kept their own 3+ GB copy of the Grype DB here.
+if [ -d /var/lib/labwarden/grype-db ]; then
+	rm -rf /var/lib/labwarden/grype-db
+	say "removed the old local grype DB (/var/lib/labwarden/grype-db)"
 fi
 
 # 2. agent script, from the dashboard so it always matches the server
@@ -57,7 +63,7 @@ chmod 755 "$BIN.tmp" && mv "$BIN.tmp" "$BIN"
 say "agent installed at $BIN"
 
 # 3. configuration (contains the token: root-only)
-mkdir -p "$CONF_DIR" /var/lib/labwarden/grype-db
+mkdir -p "$CONF_DIR" /var/lib/labwarden
 chmod 700 "$CONF_DIR" /var/lib/labwarden
 umask 077
 {
@@ -68,7 +74,6 @@ umask 077
 	[ -n "${LABWARDEN_SCAN_PATHS+x}" ] && printf "LABWARDEN_SCAN_PATHS='%s'\n" "$LABWARDEN_SCAN_PATHS"
 	printf "LABWARDEN_SCAN_DOCKER='%s'\n" "${LABWARDEN_SCAN_DOCKER:-auto}"
 	printf "LABWARDEN_INTERVAL='%s'\n" "${LABWARDEN_INTERVAL:-21600}"
-	printf "GRYPE_DB_CACHE_DIR='/var/lib/labwarden/grype-db'\n"
 	printf "PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'\n"
 } >"$CONF_DIR/agent.env"
 umask 022
@@ -78,7 +83,7 @@ say "configuration written to $CONF_DIR/agent.env"
 if has_systemd; then
 	cat >"$UNIT_DIR/labwarden-agent.service" <<'EOF'
 [Unit]
-Description=LabWarden vulnerability scan (grype)
+Description=LabWarden vulnerability scan (syft)
 Wants=network-online.target
 After=network-online.target
 

@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-LabWarden: a homelab vulnerability aggregation dashboard. Agents on VMs and Docker hosts run Grype and push JSON reports to a central Go server, which stores them in SQLite and serves a React (Chakra UI v3) dashboard. The server can also scan images centrally.
+LabWarden: a homelab vulnerability aggregation dashboard. Agents on VMs and Docker hosts run Syft and push SBOMs to a central Go server, which matches them with Grype on a job queue, stores the results in SQLite and serves a React (Chakra UI v3) dashboard. The Grype DB lives on the server only; a new one each night re-matches every stored SBOM. The server can also scan images centrally.
 
 Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 
@@ -10,8 +10,8 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 2. Solo repo: commit straight to `main`, small conventional commits, each one building and passing `scripts/test.sh`.
 3. No secrets in git. Tokens and passwords live in the gitignored `.env` (generate with `scripts/dev-env.sh`). Ingest tokens are stored hashed.
 4. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
-5. Pin tool versions (`GRYPE_VERSION` in the Dockerfiles, base image tags). Bump deliberately.
-6. Library APIs (Chakra v3, Recharts, chi, modernc sqlite) change often: check current docs with ctx7 before writing against them.
+5. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in the agent Dockerfile and `install.sh`, River in `go.mod`, base image tags). Bump Grype and Syft together, deliberately.
+6. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check current docs with ctx7 before writing against them.
 
 ## Layout
 
@@ -21,7 +21,9 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 | Grype JSON parser (fixtures in `testdata/`) | `server/internal/grype` |
 | SQLite store, schema, queries | `server/internal/store` |
 | HTTP API (`/api/v1`), auth, ingest | `server/internal/api` |
-| Central scanner (runs the grype binary) | `server/internal/scanner` |
+| Scanner (runs the grype binary) and the single Grype DB | `server/internal/scanner` |
+| Job queue (River on `queue.db`): SBOM matching, central scans, re-matches, DB update | `server/internal/jobs` |
+| Stored SBOM files (content-addressed, gzipped) | `server/internal/sboms` |
 | Webhook alerts for new findings | `server/internal/notify` |
 | React UI (Vite, Chakra UI v3, TanStack Query), embedded into the binary | `web/` |
 | Agent script, installer, Docker agent image | `agent/` |

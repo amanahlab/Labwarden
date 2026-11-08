@@ -163,7 +163,6 @@ func (s *Server) ingestSBOM(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusRequestEntityTooLarge, "sbom too large")
 	case errors.Is(err, jobs.ErrBusy):
 		s.event(r, "warn", "ingest", m.Host, m.RunID, "SBOM refused: "+err.Error())
-		w.Header().Set("Retry-After", "300")
 		writeErr(w, http.StatusServiceUnavailable, err.Error())
 	case err != nil:
 		s.event(r, "error", "ingest", m.Host, m.RunID, "failed to queue SBOM: "+err.Error())

@@ -1,6 +1,6 @@
 #!/bin/sh
-# LabWarden agent: runs Grype on this machine and pushes the reports to a LabWarden
-# dashboard. Scans the root filesystem (VM mode) and/or every image used by a
+# LabWarden agent: catalogs the packages on this machine with Syft and pushes the
+# SBOMs to a LabWarden dashboard, which matches them against its vulnerability DB. Scans the root filesystem (VM mode) and/or every image used by a
 # running container (Docker mode). Logs to stdout and to the dashboard.
 #
 # Configuration comes from the environment, optionally loaded from
@@ -14,13 +14,12 @@
 #   LABWARDEN_SCAN_DOCKER  auto | true | false (default: auto = if a Docker socket is reachable)
 #   LABWARDEN_DOCKER_SOCK  Docker socket path (default: /var/run/docker.sock)
 #   LABWARDEN_DOCKER_LABEL only scan containers with this label, e.g. labwarden.scan=true
-#   LABWARDEN_EXCLUDES     space-separated grype --exclude globs for directory scans
+#   LABWARDEN_EXCLUDES     space-separated syft --exclude globs for directory scans
 #   LABWARDEN_INTERVAL     seconds between runs, reported so the dashboard can flag silent hosts
-#   LABWARDEN_SPOOL        directory for reports that failed to upload (default: /var/lib/labwarden/spool)
-#   GRYPE_DB_CACHE_DIR where grype keeps its vulnerability DB
+#   LABWARDEN_SPOOL        directory for SBOMs that failed to upload (default: /var/lib/labwarden/spool)
 set -u
 
-AGENT_VERSION="1.0.0"
+AGENT_VERSION="2.0.0"
 
 if [ -f /etc/labwarden/agent.env ]; then set -a; . /etc/labwarden/agent.env; set +a; fi
 
@@ -36,8 +35,8 @@ LABWARDEN_DOCKER_LABEL=${LABWARDEN_DOCKER_LABEL:-}
 LABWARDEN_EXCLUDES=${LABWARDEN_EXCLUDES-./proc/** ./sys/** ./dev/** ./run/** ./tmp/** ./var/lib/docker/** ./var/lib/containerd/** ./var/lib/labwarden/** ./snap/** ./mnt/** ./media/**}
 LABWARDEN_INTERVAL=${LABWARDEN_INTERVAL:-21600}
 LABWARDEN_SPOOL=${LABWARDEN_SPOOL:-/var/lib/labwarden/spool}
-GRYPE=${GRYPE:-grype}
-export GRYPE_CHECK_FOR_APP_UPDATE=false
+SYFT=${SYFT:-syft}
+export SYFT_CHECK_FOR_APP_UPDATE=false
 
 RUN_ID="$(date +%s)-$$"
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/labwarden.XXXXXX") || exit 1
@@ -58,7 +57,7 @@ urlenc() {
 api() { # api <path> <content-type> <body-file> [extra curl args]
 	_path=$1 _ctype=$2 _file=$3
 	shift 3
-	curl -fsS --retry 3 --retry-delay 5 --max-time 600 \
+	curl -fsS --retry 3 --retry-delay 5 --max-time 120 \
 		-H "Authorization: Bearer ${LABWARDEN_TOKEN}" -H "Content-Type: ${_ctype}" -H "User-Agent: labwarden-agent/${AGENT_VERSION}" \
 		--data-binary "@${_file}" "$@" "${LABWARDEN_URL}${_path}"
 }
@@ -194,20 +193,22 @@ query_for() { # query_for <target-name> <duration-ms>
 		"$(urlenc "$(host_ip)")" "$AGENT_VERSION" "$LABWARDEN_INTERVAL" "$RUN_ID" "$(urlenc "$1")" "$2"
 }
 
-upload() { # upload <gz-file> <query>
-	api "/api/v1/ingest/report?$2" application/json "$1" -H "Content-Encoding: gzip" -o "$WORK/resp.json"
+upload() { # upload <gz-file> <query> [endpoint]: the server answers 202 and matches it in the background
+	api "/api/v1/ingest/${3:-sbom}?$2" application/json "$1" -H "Content-Encoding: gzip" -o "$WORK/resp.json"
 }
 
-# Re-send reports that failed to upload on an earlier run.
+# Re-send SBOMs that failed to upload on an earlier run. *.sbom.gz are SBOMs;
+# *.json.gz are Grype reports spooled by agents before 2.0.
 flush_spool() {
 	[ -d "$LABWARDEN_SPOOL" ] || return 0
-	for f in "$LABWARDEN_SPOOL"/*.json.gz; do
+	for f in "$LABWARDEN_SPOOL"/*.sbom.gz "$LABWARDEN_SPOOL"/*.json.gz; do
 		[ -f "$f" ] || continue
-		if upload "$f" "$(cat "${f%.json.gz}.query")" 2>/dev/null; then
-			rm -f "$f" "${f%.json.gz}.query"
-			event info "uploaded spooled report $(basename "$f")"
+		case "$f" in *.sbom.gz) _base=${f%.sbom.gz} _ep=sbom ;; *) _base=${f%.json.gz} _ep=report ;; esac
+		if upload "$f" "$(cat "$_base.query")" "$_ep" 2>/dev/null; then
+			rm -f "$f" "$_base.query"
+			event info "uploaded spooled $_ep $(basename "$f")"
 		else
-			log warn "dashboard still unreachable; keeping spooled reports"
+			log warn "dashboard unreachable or busy; keeping spooled uploads"
 			return 0
 		fi
 	done
@@ -216,34 +217,34 @@ flush_spool() {
 spool() { # spool <gz-file> <query>
 	mkdir -p "$LABWARDEN_SPOOL" && chmod 700 "$LABWARDEN_SPOOL"
 	_name="$LABWARDEN_SPOOL/$(date +%s)-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
-	cp "$1" "$_name.json.gz" && printf '%s' "$2" >"$_name.query"
+	cp "$1" "$_name.sbom.gz" && printf '%s' "$2" >"$_name.query"
 	# keep the spool bounded
-	ls -1t "$LABWARDEN_SPOOL"/*.json.gz 2>/dev/null | tail -n +21 | while read -r old; do rm -f "$old" "${old%.json.gz}.query"; done
+	ls -1t "$LABWARDEN_SPOOL"/*.gz 2>/dev/null | tail -n +21 | while read -r old; do rm -f "$old" "${old%.*.gz}.query"; done
 }
 
-# scan <grype-source> <target-name>
+# scan <syft-source> <target-name>
 scan() {
 	_src=$1 _name=$2
-	log info "scanning $_name"
+	log info "cataloging $_name"
 	_start=$(date +%s)
 	set -f # keep exclude globs literal
 	_excl=""
 	case "$_src" in dir:*) for e in $LABWARDEN_EXCLUDES; do _excl="$_excl --exclude $e"; done ;; esac
 	# shellcheck disable=SC2086
-	if ! "$GRYPE" "$_src" -o json $_excl >"$WORK/report.json" 2>"$WORK/grype.err"; then
+	if ! "$SYFT" scan "$_src" -o syft-json -q $_excl >"$WORK/sbom.json" 2>"$WORK/syft.err"; then
 		set +f
-		event error "grype failed on $_name: $(tail -c 800 "$WORK/grype.err")"
+		event error "syft failed on $_name: $(tail -c 800 "$WORK/syft.err")"
 		return 1
 	fi
 	set +f
 	_dur=$((($(date +%s) - _start) * 1000))
-	gzip -c "$WORK/report.json" >"$WORK/report.json.gz"
+	gzip -c "$WORK/sbom.json" >"$WORK/sbom.json.gz"
 	_q=$(query_for "$_name" "$_dur")
-	if upload "$WORK/report.json.gz" "$_q" 2>"$WORK/curl.err"; then
+	if upload "$WORK/sbom.json.gz" "$_q" 2>"$WORK/curl.err"; then
 		log info "uploaded $_name: $(cat "$WORK/resp.json")"
 	else
-		spool "$WORK/report.json.gz" "$_q"
-		log error "upload of $_name failed ($(cat "$WORK/curl.err")); report spooled for the next run"
+		spool "$WORK/sbom.json.gz" "$_q"
+		log error "upload of $_name failed ($(cat "$WORK/curl.err")); SBOM spooled for the next run"
 		return 1
 	fi
 }
@@ -270,20 +271,16 @@ main() {
 		if docker_enabled; then KIND=docker; else KIND=vm; fi
 	fi
 
-	if ! command -v "$GRYPE" >/dev/null 2>&1; then
-		log error "grype not found (GRYPE=$GRYPE)"
-		run_status error "grype is not installed on this host" 2>/dev/null
+	if ! command -v "$SYFT" >/dev/null 2>&1; then
+		log error "syft not found (SYFT=$SYFT)"
+		run_status error "syft is not installed on this host; re-run install.sh" 2>/dev/null
 		exit 1
 	fi
 
 	_t0=$(date +%s)
-	run_status started "scan run started (agent $AGENT_VERSION, $($GRYPE version 2>/dev/null | awk '/^Version:/{print "grype " $2}'))" ||
-		log warn "dashboard unreachable at $LABWARDEN_URL; reports will be spooled"
+	run_status started "scan run started (agent $AGENT_VERSION, $($SYFT version 2>/dev/null | awk '/^Version:/{print "syft " $2}'))" ||
+		log warn "dashboard unreachable at $LABWARDEN_URL; SBOMs will be spooled"
 	flush_spool
-
-	if ! "$GRYPE" db update -q >"$WORK/db.log" 2>&1; then
-		event warn "grype DB update failed, scanning with the cached DB: $(tail -c 500 "$WORK/db.log")"
-	fi
 
 	failed=0
 	scanned=0
