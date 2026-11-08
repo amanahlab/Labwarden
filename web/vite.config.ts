@@ -8,5 +8,5 @@ export default defineConfig({
     host: true,
     proxy: { '/api': process.env.VULNX_API ?? 'http://localhost:8080' },
   },
-  build: { chunkSizeWarningLimit: 1500 },
+  build: { chunkSizeWarningLimit: 600 },
 })

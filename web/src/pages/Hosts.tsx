@@ -2,7 +2,7 @@ import { useMemo } from "react"
 import { Link } from "react-router"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { Badge, Card, Collapsible, Flex, HStack, Link as CLink, SegmentGroup, Stack, Table, Text } from "@chakra-ui/react"
-import { LuBox, LuChevronDown, LuCloud, LuMonitor, LuServer } from "react-icons/lu"
+import { LuChevronDown, LuServer } from "react-icons/lu"
 import { api, type Counts, type GroupRow, type HostRow, type List } from "@/lib/api"
 import { ago, dateTime, interval, num } from "@/lib/format"
 import { useParamsState } from "@/lib/useParamsState"
@@ -23,22 +23,11 @@ import {
 } from "@/components/common"
 import { ClearFilters } from "@/components/filters"
 import { Tooltip } from "@/components/ui/tooltip"
+import { KindTag } from "@/components/KindTag"
+import { KIND_LABEL } from "@/lib/options"
 
 const DEFAULTS = { view: "list", sort: "score", order: "desc", size: "25" }
 const FILTER_KEYS = ["q", "group", "kind", "status"]
-
-export const KIND_ICON: Record<string, typeof LuServer> = { vm: LuMonitor, docker: LuBox, central: LuCloud, host: LuServer }
-export const KIND_LABEL: Record<string, string> = { vm: "VM", docker: "Docker", central: "Registry (central)", host: "Host" }
-
-export function KindTag({ kind }: { kind: string }) {
-  const Icon = KIND_ICON[kind] ?? LuServer
-  return (
-    <HStack gap="1.5" color="fg.muted" textStyle="sm" whiteSpace="nowrap">
-      <Icon size={14} />
-      {KIND_LABEL[kind] ?? kind}
-    </HStack>
-  )
-}
 
 export function HostsPage() {
   const ps = useParamsState(DEFAULTS)

@@ -24,25 +24,10 @@ import {
   TriageBadge,
 } from "@/components/common"
 import { ClearFilters, KevToggle, SeverityChips } from "@/components/filters"
+import { FIX_OPTIONS, STATUS_OPTIONS } from "@/lib/options"
 
 const DEFAULTS = { view: "vulns", sort: "severity", order: "desc", status: "active", size: "25" }
 const FILTER_KEYS = ["q", "severity", "fix", "kev", "group", "pkg_type", "status", "host_id"]
-
-export const STATUS_OPTIONS: [string, string][] = [
-  ["active", "Open + acknowledged"],
-  ["open", "Open"],
-  ["acknowledged", "Acknowledged"],
-  ["ignored", "Ignored"],
-  ["false_positive", "False positive"],
-  ["all", "All statuses"],
-]
-
-export const FIX_OPTIONS: [string, string][] = [
-  ["fixed", "Fix available"],
-  ["not-fixed", "No fix"],
-  ["wont-fix", "Won't fix"],
-  ["unknown", "Unknown"],
-]
 
 export function VulnerabilitiesPage() {
   const ps = useParamsState(DEFAULTS)

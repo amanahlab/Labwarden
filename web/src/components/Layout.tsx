@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react"
-import { NavLink, Outlet, useNavigate } from "react-router"
+import { NavLink, Outlet, useNavigate, useNavigation } from "react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Box, Badge, Drawer, Flex, HStack, IconButton, Portal, Stack, Text, CloseButton, chakra, Input, InputGroup, Kbd } from "@chakra-ui/react"
 import {
@@ -96,6 +96,7 @@ function Brand() {
 export function Layout() {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const navigating = useNavigation().state === "loading"
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
   const me = qc.getQueryData<Me>(["me"])
@@ -190,8 +191,10 @@ export function Layout() {
             )}
           </HStack>
         </Flex>
-        <Box as="main" flex="1" px={{ base: "3", md: "6", xl: "8" }} py="6" maxW="1600px" w="full" mx="auto">
-          <Outlet />
+        <Box as="main" flex="1" px={{ base: "3", md: "6", xl: "8" }} py="6" maxW="1600px" w="full" mx="auto" aria-busy={navigating}>
+          <Box opacity={navigating ? 0.6 : 1} transition="opacity 0.15s">
+            <Outlet />
+          </Box>
         </Box>
       </Flex>
     </Flex>

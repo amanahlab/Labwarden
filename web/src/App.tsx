@@ -5,35 +5,34 @@ import { Center, Spinner } from "@chakra-ui/react"
 import { api, setUnauthorizedHandler, type Me } from "@/lib/api"
 import { Layout } from "@/components/Layout"
 import { LoginPage } from "@/pages/Login"
-import { OverviewPage } from "@/pages/Overview"
-import { VulnerabilitiesPage } from "@/pages/Vulnerabilities"
-import { VulnDetailPage } from "@/pages/VulnDetail"
-import { HostsPage } from "@/pages/Hosts"
-import { HostDetailPage } from "@/pages/HostDetail"
-import { ScansPage } from "@/pages/Scans"
-import { LogsPage } from "@/pages/Logs"
-import { SettingsPage } from "@/pages/Settings"
-import { NotFoundPage } from "@/pages/NotFound"
 
+const Loading = () => (
+  <Center h="100vh">
+    <Spinner size="lg" color="colorPalette.solid" />
+  </Center>
+)
+
+// Each page is its own chunk; the router loads it on first navigation.
 const router = createBrowserRouter([
   {
     path: "/",
     element: <Layout />,
+    HydrateFallback: Loading,
     children: [
-      { index: true, element: <OverviewPage /> },
-      { path: "vulnerabilities", element: <VulnerabilitiesPage /> },
-      { path: "vulnerabilities/:id", element: <VulnDetailPage /> },
-      { path: "hosts", element: <HostsPage /> },
-      { path: "hosts/:id", element: <HostDetailPage /> },
-      { path: "scans", element: <ScansPage /> },
-      { path: "logs", element: <LogsPage /> },
-      { path: "settings", element: <SettingsPage /> },
-      { path: "*", element: <NotFoundPage /> },
+      { index: true, lazy: async () => ({ Component: (await import("@/pages/Overview")).OverviewPage }) },
+      { path: "vulnerabilities", lazy: async () => ({ Component: (await import("@/pages/Vulnerabilities")).VulnerabilitiesPage }) },
+      { path: "vulnerabilities/:id", lazy: async () => ({ Component: (await import("@/pages/VulnDetail")).VulnDetailPage }) },
+      { path: "hosts", lazy: async () => ({ Component: (await import("@/pages/Hosts")).HostsPage }) },
+      { path: "hosts/:id", lazy: async () => ({ Component: (await import("@/pages/HostDetail")).HostDetailPage }) },
+      { path: "scans", lazy: async () => ({ Component: (await import("@/pages/Scans")).ScansPage }) },
+      { path: "logs", lazy: async () => ({ Component: (await import("@/pages/Logs")).LogsPage }) },
+      { path: "settings", lazy: async () => ({ Component: (await import("@/pages/Settings")).SettingsPage }) },
+      { path: "*", lazy: async () => ({ Component: (await import("@/pages/NotFound")).NotFoundPage }) },
     ],
   },
 ])
 
-export function useMe() {
+function useMe() {
   return useQuery({ queryKey: ["me"], queryFn: () => api.get<Me>("/auth/me"), staleTime: 60_000 })
 }
 
@@ -45,12 +44,7 @@ export function App() {
     setUnauthorizedHandler(() => qc.invalidateQueries({ queryKey: ["me"] }))
   }, [qc])
 
-  if (me.isPending)
-    return (
-      <Center h="100vh">
-        <Spinner size="lg" color="colorPalette.solid" />
-      </Center>
-    )
+  if (me.isPending) return <Loading />
   if (me.data && !me.data.authenticated) return <LoginPage />
   return <RouterProvider router={router} />
 }
