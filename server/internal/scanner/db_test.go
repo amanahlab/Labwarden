@@ -67,7 +67,7 @@ func newFake(t *testing.T, liveDB string) *fake {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	f.s = New(bin, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	f.s = New(bin, "syft-not-installed", nil, st, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	f.s.refreshVersion(context.Background())
 	f.s.refreshDBStatus(context.Background())
 	return f

@@ -51,11 +51,11 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sc := scanner.New("grype-not-installed", st, log)
 	sb, err := sboms.New(filepath.Join(t.TempDir(), "sboms"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	sc := scanner.New("grype-not-installed", "syft-not-installed", sb, st, log)
 	// The queue is never started, so uploads stay queued: MaxQueued is reachable.
 	q, err := jobs.Open(context.Background(), jobs.Config{Path: filepath.Join(t.TempDir(), "queue.db"),
 		DBUpdateAt: "03:00", SBOMs: sb, MaxQueued: testMaxQueued}, st, sc, log)

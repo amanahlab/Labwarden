@@ -83,12 +83,12 @@ func run(log *slog.Logger) error {
 	}
 	st.OnIngest(nt.Ingested)
 
-	sc := scanner.New(env("LABWARDEN_GRYPE_BIN", "grype"), st, log)
-	sc.Init(ctx)
 	sb, err := sboms.New(filepath.Join(dataDir, "sboms"))
 	if err != nil {
 		return err
 	}
+	sc := scanner.New(env("LABWARDEN_GRYPE_BIN", "grype"), env("LABWARDEN_SYFT_BIN", "syft"), sb, st, log)
+	sc.Init(ctx)
 	workers, _ := strconv.Atoi(env("LABWARDEN_SCAN_WORKERS", "2"))
 	maxQueued, _ := strconv.Atoi(env("LABWARDEN_QUEUE_MAX", "1000"))
 	q, err := jobs.Open(ctx, jobs.Config{

@@ -28,6 +28,11 @@ db) case "$2" in
 esac
 `
 
+// fakeSyft catalogs every source as an empty image SBOM.
+const fakeSyft = `#!/bin/sh
+echo '{"artifacts":[],"source":{"type":"image"}}'
+`
+
 func setup(t *testing.T, withDB bool) (*Queue, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -36,6 +41,9 @@ func setup(t *testing.T, withDB bool) (*Queue, *store.Store) {
 		bin = filepath.Join(dir, "missing-grype")
 	}
 	if err := os.WriteFile(filepath.Join(dir, "grype"), []byte(fakeGrype), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "syft"), []byte(fakeSyft), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	report, _ := filepath.Abs("../grype/testdata/alpine312.json")
@@ -48,13 +56,13 @@ func setup(t *testing.T, withDB bool) (*Queue, *store.Store) {
 	}
 	t.Cleanup(func() { st.Close() })
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	sc := scanner.New(bin, st, log)
-	sc.Init(context.Background())
-	if _, err := sc.UpdateDB(context.Background(), 0); err != nil { // finds the fake DB
-		t.Fatal(err)
-	}
 	sb, err := sboms.New(filepath.Join(dir, "sboms"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	sc := scanner.New(bin, filepath.Join(dir, "syft"), sb, st, log)
+	sc.Init(context.Background())
+	if _, err := sc.UpdateDB(context.Background(), 0); err != nil { // finds the fake DB
 		t.Fatal(err)
 	}
 	q, err := Open(context.Background(), Config{Path: filepath.Join(dir, "queue.db"), ScanWorkers: 2,
@@ -113,6 +121,10 @@ func TestSchedulerScansDueCentralTargets(t *testing.T) {
 		got, err := st.GetCentralTarget(ctx, c.ID)
 		return err == nil && got.LastStatus == "ok"
 	})
+	// Its SBOM is kept, so a new DB re-matches it like an agent's.
+	if ids, err := st.LiveSBOMTargets(ctx); err != nil || len(ids) != 1 {
+		t.Fatalf("central target sboms = %v, %v; want one", ids, err)
+	}
 	// Finished, so the next run of the same target is not a duplicate.
 	waitFor(t, "job completion", func() bool { s, _ := q.Stats(ctx); return s.Queued == 0 && s.Running == 0 })
 	if ok, err := q.EnqueueCentral(ctx, c.ID); err != nil || !ok {

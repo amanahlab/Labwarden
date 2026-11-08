@@ -10,7 +10,7 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 2. Solo repo: commit straight to `main`, small conventional commits, each one building and passing `scripts/test.sh`.
 3. No secrets in git. Tokens and passwords live in the gitignored `.env` (generate with `scripts/dev-env.sh`). Ingest tokens are stored hashed.
 4. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
-5. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in the agent Dockerfile and `install.sh`, River in `go.mod`, base image tags). Bump Grype and Syft together, deliberately.
+5. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, River in `go.mod`, base image tags). Bump Grype and Syft together, deliberately.
 6. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check current docs with ctx7 before writing against them.
 
 ## Layout

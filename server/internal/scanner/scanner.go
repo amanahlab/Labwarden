@@ -1,6 +1,6 @@
 // Package scanner runs Grype on the server: registry-image scans ("central
-// targets"), SBOMs uploaded by agents, and DB updates. Package jobs decides
-// when each runs.
+// targets", catalogued with Syft), SBOMs uploaded by agents, and DB updates.
+// Package jobs decides when each runs.
 package scanner
 
 import (
@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -18,11 +20,14 @@ import (
 	"time"
 
 	"github.com/amanahlab/labwarden/server/internal/grype"
+	"github.com/amanahlab/labwarden/server/internal/sboms"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 type Scanner struct {
 	bin     string
+	syft    string
+	sboms   *sboms.Files
 	st      *store.Store
 	log     *slog.Logger
 	timeout time.Duration
@@ -45,8 +50,11 @@ type Status struct {
 	Running      string `json:"running,omitempty"`
 }
 
-func New(bin string, st *store.Store, log *slog.Logger) *Scanner {
-	return &Scanner{bin: bin, st: st, log: log, timeout: 20 * time.Minute, dbDir: grypeDBDir()}
+// New returns a scanner running grype from bin. Central scans catalog images
+// with the syft binary and keep the SBOM in files, so they are re-matched
+// against every new DB like the SBOMs agents upload.
+func New(bin, syft string, files *sboms.Files, st *store.Store, log *slog.Logger) *Scanner {
+	return &Scanner{bin: bin, syft: syft, sboms: files, st: st, log: log, timeout: 20 * time.Minute, dbDir: grypeDBDir()}
 }
 
 func (s *Scanner) Status() Status {
@@ -81,19 +89,22 @@ func (s *Scanner) ScanCentral(ctx context.Context, id int64) error {
 	}()
 	s.event(ctx, "info", c.HostName, "central scan started: "+c.Ref)
 	start := time.Now()
-	rep, err := s.grype(ctx, "registry:"+c.Ref)
+	rep, sha, size, err := s.scanImage(ctx, c.Ref)
 	meta := store.IngestMeta{Host: c.HostName, Kind: "central", Group: c.Group, Target: c.Ref, Source: "server",
 		IntervalSec: c.IntervalMin * 60, DurationMS: time.Since(start).Milliseconds(), AgentVersion: "server"}
+	var res *store.IngestResult
 	if err == nil {
-		var res *store.IngestResult
 		res, err = s.st.IngestReport(ctx, meta, rep)
-		if err == nil {
-			_ = s.st.MarkCentralRun(ctx, id, "ok")
-			_, _ = s.st.CompleteRun(ctx, meta, "ok", nil)
-			s.event(ctx, "info", c.HostName, fmt.Sprintf("central scan of %s finished in %s: %d findings (%d new, %d fixed)",
-				c.Ref, time.Since(start).Round(time.Second), res.Findings, res.New, res.Fixed))
-			return nil
-		}
+	}
+	if err == nil {
+		err = s.st.SetTargetSBOM(ctx, res.TargetID, sha, size, meta)
+	}
+	if err == nil {
+		_ = s.st.MarkCentralRun(ctx, id, "ok")
+		_, _ = s.st.CompleteRun(ctx, meta, "ok", nil)
+		s.event(ctx, "info", c.HostName, fmt.Sprintf("central scan of %s finished in %s: %d findings (%d new, %d fixed)",
+			c.Ref, time.Since(start).Round(time.Second), res.Findings, res.New, res.Fixed))
+		return nil
 	}
 	_ = s.st.MarkCentralRun(ctx, id, "error: "+trim(err.Error(), 300))
 	_, _ = s.st.CompleteRun(ctx, meta, "error", nil)
@@ -116,6 +127,49 @@ func (s *Scanner) MatchSBOM(ctx context.Context, m store.IngestMeta, path string
 		m.Target = "sbom" // grype would name it after the temp file
 	}
 	return s.st.IngestReport(ctx, m, rep)
+}
+
+// scanImage catalogs a registry image with syft, stores the SBOM and matches it.
+func (s *Scanner) scanImage(ctx context.Context, ref string) (rep *grype.Report, sha string, size int64, err error) {
+	if !s.HasDB() {
+		return nil, "", 0, errors.New("the vulnerability DB has not been downloaded yet; try again later")
+	}
+	if sha, size, err = s.catalog(ctx, "registry:"+ref); err != nil {
+		return nil, "", 0, err
+	}
+	path, err := s.sboms.Extract(sha)
+	if err != nil {
+		return nil, "", 0, err
+	}
+	defer os.Remove(path)
+	rep, err = s.grype(ctx, "sbom:"+path)
+	return rep, sha, size, err
+}
+
+// catalog runs syft on source and streams its SBOM into the SBOM files.
+func (s *Scanner) catalog(ctx context.Context, source string) (sha string, size int64, err error) {
+	ctx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, s.syft, "scan", source, "-o", "syft-json", "-q")
+	cmd.Env = append(os.Environ(), "SYFT_CHECK_FOR_APP_UPDATE=false")
+	cmd.Stderr = &stderr
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", 0, err
+	}
+	if err := cmd.Start(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", 0, fmt.Errorf("syft binary %q not found", s.syft)
+		}
+		return "", 0, err
+	}
+	sha, size, putErr := s.sboms.Put(out)
+	_, _ = io.Copy(io.Discard, out) // a failed Put must not leave syft blocked on a full pipe
+	if err := cmd.Wait(); err != nil {
+		return "", 0, fmt.Errorf("syft %s: %v: %s", source, err, trim(stderr.String(), 1000))
+	}
+	return sha, size, putErr
 }
 
 // grype runs one scan. Callers are jobs on the scan queue, whose MaxWorkers

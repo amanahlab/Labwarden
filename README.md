@@ -54,7 +54,7 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
 |---|---|
 | **VMs** | `install.sh` installs Syft, the agent and a **systemd timer** (`OnCalendar` every 6h, `RandomizedDelaySec=15m`, `Persistent=true` so missed runs catch up). Without systemd (Alpine, containers) it writes `/etc/cron.d/labwarden-agent` at a random minute. A lock prevents overlapping runs. |
 | **Docker hosts** | The `labwarden-agent` container runs the agent, then sleeps `LABWARDEN_INTERVAL` seconds, in a loop. It lists running containers through the read-only Docker socket and catalogs each distinct image. If a tag was moved by a rebuild, it scans the image actually running. If that image was already deleted, it scans the container filesystem. `LABWARDEN_DOCKER_LABEL` limits scanning to labelled containers. |
-| **Registry images** | Added in Settings. The server's scheduler scans `registry:<ref>` every N minutes, with no agent involved. |
+| **Registry images** | Added in Settings. Every N minutes the server catalogs `registry:<ref>` with Syft, keeps the SBOM and matches it, with no agent involved. Like agent SBOMs, it is re-matched against each new DB. |
 | **Grype DB** | Only the server has it (about 3.4 GB). It checks for a new one once a day at `LABWARDEN_DB_UPDATE_AT`, downloads it next to the live copy and swaps it in, so there is never a second download and scans never wait. A new DB queues a re-match of every stored SBOM. Agents need no DB and no internet access. |
 
 ### How SBOMs and logs are shipped
