@@ -115,6 +115,16 @@ has_vuln log4j-core '.packages == "log4j-core"'
 api "$URL/api/v1/findings?pkg_type=apk&size=1" | jqr -e '.total > 0' >/dev/null || fail "no apk findings from the docker agent"
 pass "docker image findings (apk)"
 
+echo "== findings by host and by location"
+api "$URL/api/v1/findings/by-host?status=all&size=100" | jqr -e '[.items[].host_name] | contains(["testbed-vm", "testbed-docker"])' >/dev/null ||
+  fail "by-host is missing a testbed host"
+pass "findings grouped by host"
+row=$(api "$URL/api/v1/findings/by-location?q=log4j-core&status=all&size=1" | jqr -r '.items[0] | "\(.total) target_id=\(.target_id)&location=\(.location | @uri)"')
+want=${row%% *}
+got=$(api "$URL/api/v1/findings?q=log4j-core&status=all&size=1&${row#* }" | jqr -r '.total')
+{ [ "$want" -gt 0 ] && [ "$got" = "$want" ]; } 2>/dev/null || fail "location drill-down: $got findings, row says $want"
+pass "a location row drills down to its $want findings"
+
 echo "== triage"
 VID=$(api "$URL/api/v1/vulnerabilities?q=CVE-2021-44228" | jqr -r '.items[0].id')
 api -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"host_id":0,"status":"acknowledged","note":"e2e"}' "$URL/api/v1/vulnerabilities/$VID/triage"
