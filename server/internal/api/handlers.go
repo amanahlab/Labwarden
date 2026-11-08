@@ -256,46 +256,6 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) listTokens(w http.ResponseWriter, r *http.Request) {
-	out, err := s.st.ListTokens(r.Context())
-	if err != nil {
-		s.storeErr(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) createToken(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Name string `json:"name"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeErr(w, http.StatusBadRequest, "invalid request")
-		return
-	}
-	t, plain, err := s.st.CreateToken(r.Context(), clean(body.Name, 64))
-	if err != nil {
-		s.storeErr(w, r, err)
-		return
-	}
-	s.event(r, "info", "system", "", "", "ingest token created: "+t.Name)
-	writeJSON(w, http.StatusCreated, map[string]any{"token": t, "value": plain})
-}
-
-func (s *Server) deleteToken(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(r)
-	if !ok {
-		writeErr(w, http.StatusBadRequest, "invalid id")
-		return
-	}
-	if err := s.st.DeleteToken(r.Context(), id); err != nil {
-		s.storeErr(w, r, err)
-		return
-	}
-	s.event(r, "warn", "system", "", "", fmt.Sprintf("ingest token #%d revoked", id))
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
 func (s *Server) listCentral(w http.ResponseWriter, r *http.Request) {
 	out, err := s.st.ListCentralTargets(r.Context())
 	if err != nil {

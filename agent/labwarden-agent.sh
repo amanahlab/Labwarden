@@ -6,7 +6,8 @@
 # Configuration comes from the environment, optionally loaded from
 # /etc/labwarden/agent.env (see install.sh):
 #   LABWARDEN_URL          dashboard base URL (required), e.g. http://labwarden.lan:8080
-#   LABWARDEN_TOKEN        ingest token (required)
+#   LABWARDEN_TOKEN        enrollment token from Settings; needed until this host has
+#                          enrolled, after which it uses its own credential
 #   LABWARDEN_HOST         host name shown in the dashboard (default: hostname)
 #   LABWARDEN_GROUP        host group (default: default)
 #   LABWARDEN_KIND         vm | docker (default: docker when scanning containers, else vm)
@@ -16,15 +17,16 @@
 #   LABWARDEN_DOCKER_LABEL only scan containers with this label, e.g. labwarden.scan=true
 #   LABWARDEN_EXCLUDES     space-separated syft --exclude globs for directory scans
 #   LABWARDEN_INTERVAL     seconds between runs, reported so the dashboard can flag silent hosts
-#   LABWARDEN_SPOOL        directory for SBOMs that failed to upload (default: /var/lib/labwarden/spool)
+#   LABWARDEN_STATE        directory for the host credential (default: /var/lib/labwarden)
+#   LABWARDEN_SPOOL        directory for SBOMs that failed to upload (default: $LABWARDEN_STATE/spool)
 set -u
 
-AGENT_VERSION="2.0.0"
+AGENT_VERSION="3.0.0"
 
 if [ -f /etc/labwarden/agent.env ]; then set -a; . /etc/labwarden/agent.env; set +a; fi
 
 : "${LABWARDEN_URL:?LABWARDEN_URL is required}"
-: "${LABWARDEN_TOKEN:?LABWARDEN_TOKEN is required}"
+LABWARDEN_TOKEN=${LABWARDEN_TOKEN:-}
 LABWARDEN_URL=${LABWARDEN_URL%/}
 LABWARDEN_HOST=${LABWARDEN_HOST:-$(hostname 2>/dev/null || cat /etc/hostname)}
 LABWARDEN_GROUP=${LABWARDEN_GROUP:-default}
@@ -34,7 +36,10 @@ LABWARDEN_DOCKER_SOCK=${LABWARDEN_DOCKER_SOCK:-/var/run/docker.sock}
 LABWARDEN_DOCKER_LABEL=${LABWARDEN_DOCKER_LABEL:-}
 LABWARDEN_EXCLUDES=${LABWARDEN_EXCLUDES-./proc/** ./sys/** ./dev/** ./run/** ./tmp/** ./var/lib/docker/** ./var/lib/containerd/** ./var/lib/labwarden/** ./snap/** ./mnt/** ./media/**}
 LABWARDEN_INTERVAL=${LABWARDEN_INTERVAL:-21600}
-LABWARDEN_SPOOL=${LABWARDEN_SPOOL:-/var/lib/labwarden/spool}
+LABWARDEN_STATE=${LABWARDEN_STATE:-/var/lib/labwarden}
+LABWARDEN_SPOOL=${LABWARDEN_SPOOL:-$LABWARDEN_STATE/spool}
+CRED_FILE="$LABWARDEN_STATE/credential"
+CRED=""
 SYFT=${SYFT:-syft}
 export SYFT_CHECK_FOR_APP_UPDATE=false
 
@@ -58,7 +63,7 @@ api() { # api <path> <content-type> <body-file> [extra curl args]
 	_path=$1 _ctype=$2 _file=$3
 	shift 3
 	curl -fsS --retry 3 --retry-delay 5 --max-time 120 \
-		-H "Authorization: Bearer ${LABWARDEN_TOKEN}" -H "Content-Type: ${_ctype}" -H "User-Agent: labwarden-agent/${AGENT_VERSION}" \
+		-H "Authorization: Bearer ${CRED}" -H "Content-Type: ${_ctype}" -H "User-Agent: labwarden-agent/${AGENT_VERSION}" \
 		--data-binary "@${_file}" "$@" "${LABWARDEN_URL}${_path}"
 }
 
@@ -68,6 +73,42 @@ event() {
 	printf '{"host":%s,"level":%s,"run_id":%s,"message":%s}' \
 		"$(json_str "$LABWARDEN_HOST")" "$(json_str "$1")" "$(json_str "$RUN_ID")" "$(json_str "$2")" >"$WORK/event.json"
 	api /api/v1/ingest/event application/json "$WORK/event.json" -o /dev/null 2>/dev/null || true
+}
+
+# The host credential: the dashboard hands it out once, at enrollment, and
+# binds it to LABWARDEN_HOST. A credential stored for another host name (the
+# machine was renamed) is not used.
+load_credential() {
+	CRED=""
+	[ -f "$CRED_FILE" ] && [ "$(cat "$CRED_FILE.host" 2>/dev/null)" = "$LABWARDEN_HOST" ] || return 1
+	CRED=$(cat "$CRED_FILE")
+	case "$CRED" in "" | *[!A-Za-z0-9_]*) CRED="" && return 1 ;; esac
+}
+
+# enroll: trade LABWARDEN_TOKEN for this host's credential.
+enroll() {
+	if [ -z "$LABWARDEN_TOKEN" ]; then
+		log error "this host is not enrolled and LABWARDEN_TOKEN is not set; re-run install.sh with an enrollment token from Settings"
+		return 1
+	fi
+	printf '{"host":%s}' "$(json_str "$LABWARDEN_HOST")" >"$WORK/enroll.json"
+	: >"$WORK/enrolled.json"
+	_code=$(curl -sS --max-time 60 -H "Authorization: Bearer ${LABWARDEN_TOKEN}" -H "Content-Type: application/json" \
+		-H "User-Agent: labwarden-agent/${AGENT_VERSION}" --data-binary "@$WORK/enroll.json" \
+		-o "$WORK/enrolled.json" -w '%{http_code}' "${LABWARDEN_URL}/api/v1/ingest/enroll")
+	case "$_code" in
+	201) ;;
+	401) log error "enrollment refused: the token is unknown, revoked, expired or used up; create a new one in Settings and re-run install.sh" && return 1 ;;
+	409) log error "$LABWARDEN_HOST is already enrolled; reset its agent credential on the host's page in the dashboard" && return 1 ;;
+	*) log error "enrollment failed (HTTP ${_code:-none}); will try again on the next run" && return 1 ;;
+	esac
+	_cred=$(sed -n 's/.*"credential":"\([A-Za-z0-9_]*\)".*/\1/p' "$WORK/enrolled.json")
+	[ -n "$_cred" ] || { log error "enrollment answer carried no credential" && return 1; }
+	mkdir -p "$LABWARDEN_STATE" && chmod 700 "$LABWARDEN_STATE"
+	(umask 077 && printf '%s' "$_cred" >"$CRED_FILE.tmp" && printf '%s' "$LABWARDEN_HOST" >"$CRED_FILE.host") &&
+		mv "$CRED_FILE.tmp" "$CRED_FILE" || { log error "could not store the credential in $CRED_FILE" && return 1; }
+	CRED=$_cred
+	log info "enrolled $LABWARDEN_HOST with the dashboard"
 }
 
 host_os() {
@@ -87,7 +128,7 @@ run_status() { # run_status <started|ok|error> <message> [targets-json-array]
 		"$(json_str "$LABWARDEN_HOST")" "$(json_str "$KIND")" "$(json_str "$LABWARDEN_GROUP")" "$(json_str "$(host_os)")" \
 		"$(json_str "$(uname -m)")" "$(json_str "$(host_ip)")" "$(json_str "$AGENT_VERSION")" "$LABWARDEN_INTERVAL" \
 		"$(json_str "$RUN_ID")" "$(json_str "$1")" "$(json_str "$2")" "${3:-[]}" >"$WORK/run.json"
-	api /api/v1/ingest/run application/json "$WORK/run.json" -o /dev/null
+	_code=$(api /api/v1/ingest/run application/json "$WORK/run.json" -o /dev/null -w '%{http_code}')
 }
 
 docker_enabled() {
@@ -193,12 +234,12 @@ query_for() { # query_for <target-name> <duration-ms>
 		"$(urlenc "$(host_ip)")" "$AGENT_VERSION" "$LABWARDEN_INTERVAL" "$RUN_ID" "$(urlenc "$1")" "$2"
 }
 
-# upload <gz-file> <query> [endpoint]: the server answers 202 and matches it in
+# upload <gz-file> <query>: the server answers 202 and matches it in
 # the background. Returns 2 when the server rejects the content itself (bad or
 # too large), which no retry can fix; 1 for anything worth retrying later.
 upload() {
 	: >"$WORK/resp.json" # curl -f writes no body on an error; never report the last success
-	_code=$(api "/api/v1/ingest/${3:-sbom}?$2" application/json "$1" -H "Content-Encoding: gzip" \
+	_code=$(api "/api/v1/ingest/sbom?$2" application/json "$1" -H "Content-Encoding: gzip" \
 		-o "$WORK/resp.json" -w '%{http_code}') && return 0
 	case "$_code" in 400 | 413 | 415 | 422) return 2 ;; esac
 	return 1
@@ -209,19 +250,18 @@ rejected() { # rejected <what>: why the server refused the last upload
 	printf 'rejected %s (HTTP %s%s)' "$1" "$_code" "${_body:+: $_body}"
 }
 
-# Re-send SBOMs that failed to upload on an earlier run. *.sbom.gz are SBOMs;
-# *.json.gz are Grype reports spooled by agents before 2.0.
+# Re-send SBOMs that failed to upload on an earlier run.
 flush_spool() {
 	[ -d "$LABWARDEN_SPOOL" ] || return 0
-	for f in "$LABWARDEN_SPOOL"/*.sbom.gz "$LABWARDEN_SPOOL"/*.json.gz; do
+	for f in "$LABWARDEN_SPOOL"/*.sbom.gz; do
 		[ -f "$f" ] || continue
-		case "$f" in *.sbom.gz) _base=${f%.sbom.gz} _ep=sbom ;; *) _base=${f%.json.gz} _ep=report ;; esac
-		if upload "$f" "$(cat "$_base.query")" "$_ep" 2>/dev/null; then
+		_base=${f%.sbom.gz}
+		if upload "$f" "$(cat "$_base.query")" 2>/dev/null; then
 			rm -f "$f" "$_base.query"
-			event info "uploaded spooled $_ep $(basename "$f")"
+			event info "uploaded spooled SBOM $(basename "$f")"
 		elif [ $? -eq 2 ]; then
 			rm -f "$f" "$_base.query" # would block every newer spooled upload forever
-			event error "dashboard $(rejected "spooled $_ep $(basename "$f")"); dropped it"
+			event error "dashboard $(rejected "spooled SBOM $(basename "$f")"); dropped it"
 		else
 			log warn "dashboard unreachable or busy; keeping spooled uploads"
 			return 0
@@ -288,6 +328,7 @@ main() {
 	if [ -z "$KIND" ]; then
 		if docker_enabled; then KIND=docker; else KIND=vm; fi
 	fi
+	load_credential || enroll || log warn "not enrolled with the dashboard; SBOMs will be spooled"
 
 	if ! command -v "$SYFT" >/dev/null 2>&1; then
 		log error "syft not found (SYFT=$SYFT)"
@@ -296,8 +337,16 @@ main() {
 	fi
 
 	_t0=$(date +%s)
-	run_status started "scan run started (agent $AGENT_VERSION, $($SYFT version 2>/dev/null | awk '/^Version:/{print "syft " $2}'))" ||
-		log warn "dashboard unreachable at $LABWARDEN_URL; SBOMs will be spooled"
+	_started="scan run started (agent $AGENT_VERSION, $($SYFT version 2>/dev/null | awk '/^Version:/{print "syft " $2}'))"
+	run_status started "$_started"
+	# A credential that was reset, or a dashboard rebuilt from scratch: enroll again, once.
+	if [ "$_code" = 401 ] && [ -n "$CRED" ]; then
+		log warn "the dashboard no longer accepts this host's credential; enrolling again"
+		rm -f "$CRED_FILE" "$CRED_FILE.host"
+		CRED=""
+		enroll && run_status started "$_started"
+	fi
+	[ "$_code" = 202 ] || log warn "dashboard at $LABWARDEN_URL did not accept the run (HTTP ${_code:-none}); SBOMs will be spooled"
 	flush_spool
 
 	failed=0

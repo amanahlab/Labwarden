@@ -21,6 +21,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/amanahlab/labwarden/server/internal/grype"
 	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/notify"
 	"github.com/amanahlab/labwarden/server/internal/sboms"
@@ -30,7 +31,7 @@ import (
 
 const (
 	testPassword  = "correct horse battery staple"
-	testToken     = "vx_test_token_0123456789abcdef"
+	testToken     = "vxe_test_token_0123456789abcdef" // enrollment token
 	testMaxQueued = 3
 )
 
@@ -55,7 +56,7 @@ func newTestAPI(t *testing.T, configure func(*Config)) (*Server, *store.Store) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	if _, err := st.ImportToken(context.Background(), "test", testToken); err != nil {
+	if err := st.ImportToken(context.Background(), "test", testToken); err != nil {
 		t.Fatal(err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -106,26 +107,26 @@ func gz(t *testing.T, b []byte) []byte {
 	return buf.Bytes()
 }
 
-func upload(t *testing.T, ts *httptest.Server, token, host string, body []byte, gzipped bool) *http.Response {
-	return uploadTo(t, ts, token, host, "/srv", body, gzipped)
-}
-
-func uploadTo(t *testing.T, ts *httptest.Server, token, host, target string, body []byte, gzipped bool) *http.Response {
+// enroll enrolls host with the test enrollment token and returns its credential.
+func enroll(t *testing.T, st *store.Store, host string) string {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/ingest/report?host="+host+"&kind=vm&group=lab&run_id=r1&target="+url.QueryEscape(target), bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	if gzipped {
-		req.Header.Set("Content-Encoding", "gzip")
-	}
-	resp, err := http.DefaultClient.Do(req)
+	cred, err := st.Enroll(context.Background(), testToken, host, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { resp.Body.Close() })
-	return resp
+	return cred
+}
+
+// ingestFixture stores the test Grype report as target of host, as a match of an SBOM would.
+func ingestFixture(t *testing.T, st *store.Store, host, target string) {
+	t.Helper()
+	rep, err := grype.Parse(bytes.NewReader(fixture(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.IngestReport(context.Background(), store.IngestMeta{Host: host, Kind: "vm", Target: target, RunID: "r1", Source: "agent"}, rep); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func login(t *testing.T, ts *httptest.Server, password string) *http.Client {
@@ -159,42 +160,20 @@ func getJSON(t *testing.T, c *http.Client, url string, out any) int {
 	return resp.StatusCode
 }
 
-func TestIngestRequiresValidToken(t *testing.T) {
-	ts, _ := newTestServer(t)
-	body := fixture(t)
-	for name, tok := range map[string]string{"missing": "", "wrong": "vx_wrong_token_0000000000000"} {
-		if got := upload(t, ts, tok, "h1", body, false).StatusCode; got != http.StatusUnauthorized {
-			t.Errorf("%s token: status %d, want 401", name, got)
+func TestIngestRequiresAgentCredential(t *testing.T) {
+	ts, st := newTestServer(t)
+	sbom := []byte(`{"artifacts":[],"source":{"type":"directory"}}`)
+	for name, tok := range map[string]string{"missing": "", "wrong": "vxa_wrong_0000000000000000", "enrollment token": testToken} {
+		if code, _ := postSBOM(t, ts, tok, "h1", "/", "r1", sbom, false); code != http.StatusUnauthorized {
+			t.Errorf("%s: status %d, want 401", name, code)
 		}
 	}
-}
-
-func TestIngestPlainAndGzip(t *testing.T) {
-	ts, _ := newTestServer(t)
-	body := fixture(t)
-	if got := upload(t, ts, testToken, "plain-host", body, false).StatusCode; got != http.StatusCreated {
-		t.Fatalf("plain upload: status %d", got)
+	cred := enroll(t, st, "h1")
+	if code, _ := postSBOM(t, ts, cred, "h1", "/", "r1", sbom, false); code != http.StatusAccepted {
+		t.Errorf("plain upload with the host's credential: status %d, want 202", code)
 	}
-	if got := upload(t, ts, testToken, "gzip-host", gz(t, body), true).StatusCode; got != http.StatusCreated {
-		t.Fatalf("gzip upload: status %d", got)
-	}
-	if got := upload(t, ts, testToken, "bad-host", []byte("not json"), false).StatusCode; got != http.StatusBadRequest {
-		t.Fatalf("garbage upload: status %d, want 400", got)
-	}
-
-	c := login(t, ts, testPassword)
-	var hosts struct {
-		Total int `json:"total"`
-	}
-	if code := getJSON(t, c, ts.URL+"/api/v1/hosts", &hosts); code != http.StatusOK || hosts.Total != 2 {
-		t.Fatalf("hosts: status %d total %d, want 200 and 2", code, hosts.Total)
-	}
-	var vulns struct {
-		Total int `json:"total"`
-	}
-	getJSON(t, c, ts.URL+"/api/v1/vulnerabilities", &vulns)
-	if vulns.Total == 0 {
-		t.Fatal("expected vulnerabilities after ingest")
+	if code, _ := postSBOM(t, ts, cred, "", "/gz", "r1", sbom, true); code != http.StatusAccepted {
+		t.Errorf("gzip upload without a host name: status %d, want 202", code)
 	}
 }
 
@@ -207,7 +186,7 @@ func TestUIRequiresSession(t *testing.T) {
 	if code := getJSON(t, bad, ts.URL+"/api/v1/summary", nil); code != http.StatusUnauthorized {
 		t.Fatalf("bad login summary: status %d, want 401", code)
 	}
-	// An ingest token is not a UI credential.
+	// An agent token is not a UI credential.
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/summary", nil)
 	req.Header.Set("Authorization", "Bearer "+testToken)
 	resp, err := http.DefaultClient.Do(req)
@@ -251,10 +230,8 @@ func TestVersionOnlyAfterLogin(t *testing.T) {
 }
 
 func TestExportNeutralizesFormulas(t *testing.T) {
-	ts, _ := newTestServer(t)
-	if got := uploadTo(t, ts, testToken, "h1", "=HYPERLINK(1)", fixture(t), false).StatusCode; got != http.StatusCreated {
-		t.Fatalf("upload: status %d", got)
-	}
+	ts, st := newTestServer(t)
+	ingestFixture(t, st, "h1", "=HYPERLINK(1)")
 	c := login(t, ts, testPassword)
 	resp, err := c.Get(ts.URL + "/api/v1/vulnerabilities/export.csv")
 	if err != nil {
@@ -311,12 +288,19 @@ func TestMissingAssetIs404(t *testing.T) {
 	}
 }
 
-func uploadSBOM(t *testing.T, ts *httptest.Server, target, run string, body []byte) (int, map[string]any) {
+func postSBOM(t *testing.T, ts *httptest.Server, cred, host, target, run string, body []byte, gzipped bool) (int, map[string]any) {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/ingest/sbom?host=h1&kind=vm&run_id="+run+
-		"&target="+url.QueryEscape(target), bytes.NewReader(gz(t, body)))
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	req.Header.Set("Content-Encoding", "gzip")
+	if gzipped {
+		body = gz(t, body)
+	}
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/ingest/sbom?host="+host+"&kind=vm&run_id="+run+
+		"&target="+url.QueryEscape(target), bytes.NewReader(body))
+	if cred != "" {
+		req.Header.Set("Authorization", "Bearer "+cred)
+	}
+	if gzipped {
+		req.Header.Set("Content-Encoding", "gzip")
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -328,7 +312,11 @@ func uploadSBOM(t *testing.T, ts *httptest.Server, target, run string, body []by
 }
 
 func TestIngestSBOMQueuesWithBackpressure(t *testing.T) {
-	ts, _ := newTestServer(t)
+	ts, st := newTestServer(t)
+	cred := enroll(t, st, "h1")
+	uploadSBOM := func(t *testing.T, ts *httptest.Server, target, run string, body []byte) (int, map[string]any) {
+		return postSBOM(t, ts, cred, "h1", target, run, body, true)
+	}
 	sbom := []byte(`{"artifacts":[],"source":{"type":"directory"}}`)
 	start := time.Now()
 	code, out := uploadSBOM(t, ts, "/a", "r1", sbom)

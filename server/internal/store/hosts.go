@@ -165,7 +165,12 @@ func (s *Store) UpdateHost(ctx context.Context, id int64, group, notes *string) 
 	return nil
 }
 
+// DeleteHost removes a host with all its scans and ends its agent credential.
 func (s *Store) DeleteHost(ctx context.Context, id int64) error {
+	if _, err := s.w.ExecContext(ctx, `UPDATE agent_credentials SET revoked_at=? WHERE revoked_at IS NULL
+		AND host=(SELECT name FROM hosts WHERE id=?)`, now(), id); err != nil {
+		return err
+	}
 	res, err := s.w.ExecContext(ctx, `DELETE FROM hosts WHERE id=?`, id)
 	if err != nil {
 		return err

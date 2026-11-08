@@ -41,5 +41,5 @@ docker compose up -d --build   # dashboard on http://localhost:8080
 
 ## Contracts
 
-- Agents talk to the server only through `/api/v1/ingest/*` with `Authorization: Bearer <token>`. Changing these endpoints or their query parameters means updating `agent/labwarden-agent.sh` and the README in the same commit.
+- Agents talk to the server only through `/api/v1/ingest/*`. `POST /ingest/enroll` trades an enrollment token for a host credential; every other ingest call sends `Authorization: Bearer <credential>` and may only speak for that host. Changing these endpoints or their query parameters means updating `agent/labwarden-agent.sh` and the README in the same commit.
 - Schema changes are additive migrations appended in `server/internal/store/migrations.go`; never edit an applied migration.

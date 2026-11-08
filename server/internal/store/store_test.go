@@ -130,27 +130,6 @@ func mustFindings(rep *grype.Report) []grype.Finding {
 	return f
 }
 
-func TestTokens(t *testing.T) {
-	ctx := context.Background()
-	s := openTest(t)
-	tok, plain, err := s.CreateToken(ctx, "lab")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if name, ok := s.VerifyToken(ctx, plain); !ok || name != "lab" {
-		t.Fatal("token did not verify")
-	}
-	if _, ok := s.VerifyToken(ctx, plain+"x"); ok {
-		t.Fatal("wrong token verified")
-	}
-	if err := s.DeleteToken(ctx, tok.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := s.VerifyToken(ctx, plain); ok {
-		t.Fatal("deleted token verified")
-	}
-}
-
 func TestTargetSBOMs(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()

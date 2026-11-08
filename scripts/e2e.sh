@@ -59,6 +59,24 @@ agent_matched_within 15 testbed-vm:testbed-vm
 wait_for 60 "testbed-vm reported findings" host_id testbed-vm
 wait_for 60 "testbed-docker reported findings" host_id testbed-docker
 
+echo "== agent credentials"
+# Tokens and credentials go to curl on stdin (-H @-), never on a command line.
+code=$(printf 'Authorization: Bearer %s\n' "$LABWARDEN_INGEST_TOKEN" |
+  curl -sS -o /dev/null -w '%{http_code}' -H @- -H 'Content-Type: application/json' -d '{"host":"testbed-vm"}' "$URL/api/v1/ingest/enroll")
+[ "$code" = 409 ] || fail "second enrollment of testbed-vm: status $code, want 409"
+pass "an enrolled host cannot enroll again"
+vm_post() { # vm_post <path> <json>: POST from testbed-vm with its own credential, print the status
+  docker compose --profile testbed exec -T testbed-vm sh -c \
+    'printf "Authorization: Bearer %s\n" "$(cat /var/lib/labwarden/credential)" |
+      curl -sS -o /dev/null -w "%{http_code}" -H @- -H "Content-Type: application/json" -d "$2" "$LABWARDEN_URL$1"' sh "$1" "$2"
+}
+code=$(vm_post /api/v1/ingest/run '{"host":"testbed-docker","run_id":"e2e","status":"ok","targets":[]}')
+[ "$code" = 403 ] || fail "testbed-vm credential posting as testbed-docker: status $code, want 403"
+pass "a credential only speaks for its own host"
+code=$(vm_post /api/v1/ingest/report '{}')
+[ "$code" = 404 ] || fail "/ingest/report: status $code, want 404"
+pass "/ingest/report is gone"
+
 echo "== re-match without an agent run"
 last_seen() { api "$URL/api/v1/hosts?q=$1" | jqr -r --arg n "$1" '.items[] | select(.name == $n) | .last_seen'; }
 vm_seen=$(last_seen testbed-vm)

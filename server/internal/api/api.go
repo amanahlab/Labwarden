@@ -48,8 +48,11 @@ type Server struct {
 	agentFS fs.FS
 	limiter *loginLimiter
 	budget  *failBudget // failed logins from all clients together
-	pwFP    string      // see passwordFingerprint
-	public  *url.URL    // cfg.PublicURL, nil when unset or unusable
+	// agentLimiter and agentEvents handle bad agent tokens.
+	agentLimiter *loginLimiter
+	agentEvents  *eventGate
+	pwFP         string   // see passwordFingerprint
+	public       *url.URL // cfg.PublicURL, nil when unset or unusable
 }
 
 func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *notify.Notifier, log *slog.Logger, webFS, agentFS fs.FS) *Server {
@@ -58,6 +61,7 @@ func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *no
 	}
 	s := &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agentFS: agentFS,
 		limiter: newLoginLimiter(), budget: newFailBudget(loginBudget, loginBudgetWindow),
+		agentLimiter: newLoginLimiter(), agentEvents: newEventGate(rejectedAgentEvery),
 		pwFP: passwordFingerprint(cfg.SessionKey, cfg.AdminPassword)}
 	if u, err := url.Parse(strings.TrimSpace(cfg.PublicURL)); err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != "" {
 		s.public = u
@@ -80,10 +84,11 @@ func (s *Server) Handler() http.Handler {
 		r.Post("/auth/logout", s.logout)
 		r.Get("/auth/me", s.me)
 
-		// Agent endpoints: bearer token only.
+		// Agent endpoints: an enrollment token enrolls a host, which then uses
+		// its own credential for everything else.
+		r.Post("/ingest/enroll", s.enroll)
 		r.Group(func(r chi.Router) {
-			r.Use(s.requireToken)
-			r.Post("/ingest/report", s.ingestReport)
+			r.Use(s.requireAgent)
 			r.Post("/ingest/sbom", s.ingestSBOM)
 			r.Post("/ingest/event", s.ingestEvent)
 			r.Post("/ingest/run", s.ingestRun)
@@ -104,12 +109,14 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/hosts/{id}", s.getHost)
 			r.Patch("/hosts/{id}", s.updateHost)
 			r.Delete("/hosts/{id}", s.deleteHost)
+			r.Delete("/hosts/{id}/credential", s.resetCredential)
 			r.Get("/groups", s.listGroups)
 			r.Get("/scans", s.listScans)
 			r.Get("/events", s.listEvents)
 			r.Get("/tokens", s.listTokens)
 			r.Post("/tokens", s.createToken)
-			r.Delete("/tokens/{id}", s.deleteToken)
+			r.Delete("/tokens/{id}", s.revokeToken)
+			r.Get("/agent-credentials", s.listCredentials)
 			r.Get("/central-targets", s.listCentral)
 			r.Post("/central-targets", s.createCentral)
 			r.Patch("/central-targets/{id}", s.updateCentral)

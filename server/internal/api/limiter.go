@@ -162,3 +162,38 @@ func (b *failBudget) spend() (warn bool) {
 	}
 	return false
 }
+
+// eventGate lets through one event per client every `every`, so requests
+// nobody has authenticated cannot flood the event log. Like loginLimiter it
+// is bounded and never starts over.
+type eventGate struct {
+	mu    sync.Mutex
+	last  map[string]time.Time
+	every time.Duration
+	now   func() time.Time
+}
+
+func newEventGate(every time.Duration) *eventGate {
+	return &eventGate{last: map[string]time.Time{}, every: every, now: time.Now}
+}
+
+func (g *eventGate) allow(ip string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now, key := g.now(), limitKey(ip)
+	if t, ok := g.last[key]; ok && now.Sub(t) < g.every {
+		return false
+	}
+	if len(g.last) >= maxTrackedClients {
+		for k, t := range g.last {
+			if now.Sub(t) >= g.every {
+				delete(g.last, k)
+			}
+		}
+		if len(g.last) >= maxTrackedClients {
+			return false
+		}
+	}
+	g.last[key] = now
+	return true
+}

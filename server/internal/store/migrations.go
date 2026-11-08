@@ -184,4 +184,25 @@ CREATE TABLE sessions (
 );
 CREATE INDEX sessions_expiry ON sessions(expires_at);
 `,
+	// 4: tokens become enrollment tokens (they can expire, be used up and be
+	// revoked) and each enrolled host gets its own agent credential.
+	`
+ALTER TABLE tokens ADD COLUMN expires_at TEXT;
+ALTER TABLE tokens ADD COLUMN max_uses INTEGER NOT NULL DEFAULT 0;   -- 0 = unlimited
+ALTER TABLE tokens ADD COLUMN uses INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tokens ADD COLUMN revoked_at TEXT;
+
+CREATE TABLE agent_credentials (
+  id          INTEGER PRIMARY KEY,
+  host        TEXT NOT NULL,
+  prefix      TEXT NOT NULL,
+  hash        TEXT NOT NULL UNIQUE,                -- SHA-256 of the credential
+  created_at  TEXT NOT NULL,
+  last_used   TEXT,
+  last_ip     TEXT NOT NULL DEFAULT '',
+  enrolled_by INTEGER REFERENCES tokens(id) ON DELETE SET NULL,
+  revoked_at  TEXT
+);
+CREATE UNIQUE INDEX agent_credentials_active_host ON agent_credentials(host) WHERE revoked_at IS NULL;
+`,
 }
