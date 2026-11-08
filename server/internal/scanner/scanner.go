@@ -152,7 +152,7 @@ func (s *Scanner) catalog(ctx context.Context, source string) (sha string, size 
 	defer cancel()
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, s.syft, "scan", source, "-o", "syft-json", "-q")
-	cmd.Env = append(os.Environ(), "SYFT_CHECK_FOR_APP_UPDATE=false")
+	cmd.Env = syftEnv(os.Environ())
 	cmd.Stderr = &stderr
 	out, err := cmd.StdoutPipe()
 	if err != nil {
@@ -170,6 +170,27 @@ func (s *Scanner) catalog(ctx context.Context, source string) (sha string, size 
 		return "", 0, fmt.Errorf("syft %s: %v: %s", source, err, trim(stderr.String(), 1000))
 	}
 	return sha, size, putErr
+}
+
+// syftEnv lets syft, which now pulls central images, use the registry
+// settings and credentials configured for grype (GRYPE_REGISTRY_*), unless
+// the matching SYFT_REGISTRY_* is set.
+func syftEnv(environ []string) []string {
+	set := map[string]bool{}
+	for _, kv := range environ {
+		k, _, _ := strings.Cut(kv, "=")
+		set[k] = true
+	}
+	env := append([]string{}, environ...)
+	for _, kv := range environ {
+		if rest, ok := strings.CutPrefix(kv, "GRYPE_REGISTRY_"); ok {
+			k, _, _ := strings.Cut(rest, "=")
+			if !set["SYFT_REGISTRY_"+k] {
+				env = append(env, "SYFT_REGISTRY_"+rest)
+			}
+		}
+	}
+	return append(env, "SYFT_CHECK_FOR_APP_UPDATE=false")
 }
 
 // grype runs one scan. Callers are jobs on the scan queue, whose MaxWorkers

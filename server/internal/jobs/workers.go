@@ -30,7 +30,8 @@ type centralScanWorker struct {
 	sc *scanner.Scanner
 }
 
-// Above the scanner's own 20 minute grype timeout, which pulls the image.
+// syft pulls the image and grype matches it, each within the scanner's 20
+// minute limit; a scan slower than this is cancelled and retried.
 func (w *centralScanWorker) Timeout(*river.Job[CentralScanArgs]) time.Duration {
 	return 25 * time.Minute
 }
