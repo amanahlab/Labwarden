@@ -4,7 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -14,9 +14,12 @@ import (
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
+// An admin session ends after SessionIdleTimeout without use, and after
+// sessionMaxAge in any case.
 const (
-	sessionCookie = "labwarden_session"
-	sessionTTL    = 7 * 24 * time.Hour
+	SessionIdleTimeout = 24 * time.Hour
+	sessionMaxAge      = 7 * 24 * time.Hour
+	sessionCookie      = "labwarden_session"
 
 	loginBudget       = 30 // failed logins from all clients together per window
 	loginBudgetWindow = 10 * time.Minute
@@ -24,12 +27,12 @@ const (
 
 func (s *Server) authEnabled() bool { return s.cfg.AdminPassword != "" }
 
-// signSession returns "<expiry>.<hmac>"; the session carries no other state.
-func (s *Server) signSession(exp time.Time) string {
-	v := strconv.FormatInt(exp.Unix(), 10)
-	m := hmac.New(sha256.New, s.cfg.SessionKey)
-	m.Write([]byte(v))
-	return v + "." + base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+// passwordFingerprint ties sessions to the admin password they were opened
+// with: change the password and every session ends.
+func passwordFingerprint(key []byte, password string) string {
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte(password))
+	return hex.EncodeToString(m.Sum(nil))
 }
 
 func (s *Server) validSession(r *http.Request) bool {
@@ -37,17 +40,11 @@ func (s *Server) validSession(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	v, sig, ok := strings.Cut(c.Value, ".")
-	if !ok {
-		return false
+	ok, err := s.st.ValidSession(r.Context(), c.Value, s.pwFP, SessionIdleTimeout)
+	if err != nil {
+		s.log.Error("check session", "err", err)
 	}
-	exp, err := strconv.ParseInt(v, 10, 64)
-	if err != nil || time.Now().Unix() > exp {
-		return false
-	}
-	want := s.signSession(time.Unix(exp, 0))
-	_, wantSig, _ := strings.Cut(want, ".")
-	return hmac.Equal([]byte(sig), []byte(wantSig))
+	return ok
 }
 
 func (s *Server) requireSession(next http.Handler) http.Handler {
@@ -113,9 +110,14 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.limiter.reset(ip)
-	exp := time.Now().Add(sessionTTL)
+	id, err := s.st.CreateSession(r.Context(), ip, r.UserAgent(), s.pwFP, sessionMaxAge)
+	if err != nil {
+		s.log.Error("create session", "err", err)
+		writeErr(w, http.StatusInternalServerError, "could not start a session")
+		return
+	}
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: s.signSession(exp), Path: "/", Expires: exp,
+		Name: sessionCookie, Value: id, Path: "/", MaxAge: int(sessionMaxAge.Seconds()),
 		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.cfg.CookieSecure || r.TLS != nil,
 	})
 	s.event(r, "info", "auth", "", "", "admin login from "+ip)
@@ -123,8 +125,33 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	if c, err := r.Cookie(sessionCookie); err == nil {
+		if err := s.st.DeleteSession(r.Context(), c.Value); err != nil {
+			s.log.Error("delete session", "err", err)
+			writeErr(w, http.StatusInternalServerError, "could not end the session")
+			return
+		}
+	}
+	s.clearSessionCookie(w, r)
 	writeJSON(w, http.StatusOK, map[string]bool{"authenticated": false})
+}
+
+// logoutAll ends every admin session, this one included.
+func (s *Server) logoutAll(w http.ResponseWriter, r *http.Request) {
+	n, err := s.st.DeleteAllSessions(r.Context())
+	if err != nil {
+		s.log.Error("delete sessions", "err", err)
+		writeErr(w, http.StatusInternalServerError, "could not end the sessions")
+		return
+	}
+	s.event(r, "info", "auth", "", "", fmt.Sprintf("all admin sessions ended (%d) from %s", n, s.clientIP(r)))
+	s.clearSessionCookie(w, r)
+	writeJSON(w, http.StatusOK, map[string]int64{"ended": n})
+}
+
+func (s *Server) clearSessionCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1,
+		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: s.cfg.CookieSecure || r.TLS != nil})
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {

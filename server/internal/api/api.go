@@ -43,6 +43,7 @@ type Server struct {
 	agentFS fs.FS
 	limiter *loginLimiter
 	budget  *failBudget // failed logins from all clients together
+	pwFP    string      // see passwordFingerprint
 }
 
 func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *notify.Notifier, log *slog.Logger, webFS, agentFS fs.FS) *Server {
@@ -50,7 +51,8 @@ func New(cfg Config, st *store.Store, sc *scanner.Scanner, q *jobs.Queue, nt *no
 		cfg.MaxReportMB = 256
 	}
 	return &Server{cfg: cfg, st: st, scan: sc, jobs: q, notify: nt, log: log, webFS: webFS, agentFS: agentFS,
-		limiter: newLoginLimiter(), budget: newFailBudget(loginBudget, loginBudgetWindow)}
+		limiter: newLoginLimiter(), budget: newFailBudget(loginBudget, loginBudgetWindow),
+		pwFP: passwordFingerprint(cfg.SessionKey, cfg.AdminPassword)}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -78,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 		// UI endpoints: admin session (when a password is configured).
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireSession)
+			r.Post("/auth/logout-all", s.logoutAll)
 			r.Get("/summary", s.summary)
 			r.Get("/trends", s.trends)
 			r.Get("/vulnerabilities", s.listVulns)

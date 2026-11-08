@@ -152,8 +152,8 @@ func run(log *slog.Logger) error {
 	return httpSrv.Shutdown(shutdown)
 }
 
-// sessionKey loads or creates the HMAC key that signs admin sessions, so
-// sessions survive restarts.
+// sessionKey loads or creates the key that fingerprints the admin password
+// for sessions (see api.passwordFingerprint), so sessions survive restarts.
 func sessionKey(path string) ([]byte, error) {
 	if b, err := os.ReadFile(path); err == nil && len(b) >= 32 {
 		return b, nil
@@ -165,8 +165,9 @@ func sessionKey(path string) ([]byte, error) {
 	return b, os.WriteFile(path, b, 0o600)
 }
 
-// housekeeping keeps one trend point per day and bounds the event log. With
-// authentication off it says so every hour, so it is not forgotten.
+// housekeeping keeps one trend point per day, bounds the event log and drops
+// ended sessions. With authentication off it says so every hour, so it is
+// not forgotten.
 func housekeeping(ctx context.Context, st *store.Store, log *slog.Logger, authOff bool) {
 	keep, _ := strconv.Atoi(env("LABWARDEN_EVENT_RETENTION", "50000"))
 	t := time.NewTicker(time.Hour)
@@ -180,6 +181,9 @@ func housekeeping(ctx context.Context, st *store.Store, log *slog.Logger, authOf
 		}
 		if err := st.PruneEvents(ctx, keep); err != nil && ctx.Err() == nil {
 			log.Error("prune events", "err", err)
+		}
+		if err := st.PruneSessions(ctx, api.SessionIdleTimeout); err != nil && ctx.Err() == nil {
+			log.Error("prune sessions", "err", err)
 		}
 		select {
 		case <-ctx.Done():

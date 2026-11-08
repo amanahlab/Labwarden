@@ -170,4 +170,18 @@ CREATE TABLE target_sboms (
   received_at TEXT NOT NULL
 );
 `,
+	// 3: admin sessions, so they can be revoked. Only a hash of the session
+	// ID is stored; pw_fp ties a session to the password it was opened with.
+	`
+CREATE TABLE sessions (
+  id_hash    TEXT PRIMARY KEY,                   -- SHA-256 of the cookie value
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  last_seen  TEXT NOT NULL,
+  ip         TEXT NOT NULL DEFAULT '',
+  user_agent TEXT NOT NULL DEFAULT '',
+  pw_fp      TEXT NOT NULL                       -- HMAC of the admin password
+);
+CREATE INDEX sessions_expiry ON sessions(expires_at);
+`,
 }

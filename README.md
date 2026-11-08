@@ -102,7 +102,7 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 
 | Variable | Default | |
 |---|---|---|
-| `LABWARDEN_ADMIN_PASSWORD` | *(required)* | Password for the web UI, at least 12 characters. The server will not start without it |
+| `LABWARDEN_ADMIN_PASSWORD` | *(required)* | Password for the web UI, at least 12 characters. The server will not start without it. Sessions end after 24 hours unused or 7 days in any case; changing the password, or **Settings → Sign out all sessions**, ends them all |
 | `LABWARDEN_AUTH_DISABLED` | `false` | `true` runs the web UI without a password (only on a network you trust; logged every hour). Cannot be combined with a password |
 | `LABWARDEN_INGEST_TOKEN` | | Optional bootstrap ingest token (at least 16 characters) |
 | `LABWARDEN_DATA` | `/data` | SQLite database, job queue (`queue.db`), stored SBOMs, session key, Grype DB |

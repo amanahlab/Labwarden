@@ -23,7 +23,7 @@ import {
   Tabs,
   Text,
 } from "@chakra-ui/react"
-import { LuBell, LuDownload, LuKeyRound, LuPlay, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu"
+import { LuBell, LuDownload, LuKeyRound, LuLogOut, LuPlay, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu"
 import { api, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
 import { ago, dateTime } from "@/lib/format"
 import { DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel } from "@/components/common"
@@ -391,6 +391,11 @@ function DBActions() {
 function SystemPanel() {
   const q = useQuery({ queryKey: ["system"], queryFn: () => api.get<SystemInfo>("/system"), refetchInterval: 15_000 })
   const s = q.data
+  const logoutAll = useMutation({
+    mutationFn: () => api.post("/auth/logout-all"),
+    onSuccess: () => window.location.assign("/"),
+    onError: onError("Could not sign out all sessions"),
+  })
   return (
     <Panel title="System">
       {q.error && <ErrorBox error={q.error} />}
@@ -404,9 +409,16 @@ function SystemPanel() {
             <DataList.ItemLabel>Authentication</DataList.ItemLabel>
             <DataList.ItemValue>
               {s.auth_enabled ? (
-                <Badge colorPalette="green" variant="subtle" size="sm">
-                  Password required
-                </Badge>
+                <HStack gap="2" wrap="wrap">
+                  <Badge colorPalette="green" variant="subtle" size="sm">
+                    Password required
+                  </Badge>
+                  <Tooltip content="Ends every admin session, this one included">
+                    <Button size="xs" variant="outline" loading={logoutAll.isPending} onClick={() => logoutAll.mutate()}>
+                      <LuLogOut /> Sign out all sessions
+                    </Button>
+                  </Tooltip>
+                </HStack>
               ) : (
                 <Badge colorPalette="red" variant="subtle" size="sm">
                   Disabled: LABWARDEN_AUTH_DISABLED is set
