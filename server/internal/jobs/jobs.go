@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	_ "modernc.org/sqlite"
 
+	"github.com/amanahlab/labwarden/server/internal/sboms"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
@@ -53,12 +55,22 @@ type Config struct {
 	ScanWorkers   int           // concurrent grype processes
 	Scheduler     bool          // queue due central targets every minute
 	DBUpdateEvery time.Duration // how often to check for a new vulnerability DB
+	SBOMs         *sboms.Files  // uploaded SBOMs
+	MaxQueued     int           // SubmitSBOM refuses work beyond this backlog
+	MinFreeBytes  uint64        // SubmitSBOM refuses uploads when the SBOM disk has less free
 }
 
+// ErrBusy means the server is not taking uploads right now; the agent keeps
+// the SBOM in its spool and sends it again on its next run.
+var ErrBusy = errors.New("server busy")
+
 type Queue struct {
+	cfg    Config
 	db     *sql.DB
 	client *river.Client[*sql.Tx]
 	st     *store.Store
+	sc     *scanner.Scanner
+	sboms  *sboms.Files
 	log    *slog.Logger
 }
 
@@ -82,11 +94,12 @@ func Open(ctx context.Context, cfg Config, st *store.Store, sc *scanner.Scanner,
 		return nil, fmt.Errorf("migrate queue: %w", err)
 	}
 
-	q := &Queue{db: db, st: st, log: log}
+	q := &Queue{cfg: cfg, db: db, st: st, sc: sc, sboms: cfg.SBOMs, log: log}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &centralScanWorker{sc: sc})
 	river.AddWorker(workers, &dbUpdateWorker{sc: sc})
 	river.AddWorker(workers, &scheduleWorker{q: q})
+	river.AddWorker(workers, &matchSBOMWorker{q: q})
 
 	periodic := []*river.PeriodicJob{
 		river.NewPeriodicJob(river.PeriodicInterval(cfg.DBUpdateEvery),
@@ -151,6 +164,43 @@ func (q *Queue) EnqueueDBUpdate(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return !res.UniqueSkippedAsDuplicate, nil
+}
+
+// SubmitSBOM stores an uploaded SBOM and queues it for matching. It returns
+// the job's ID, which is the pending job's when this upload is a retry.
+func (q *Queue) SubmitSBOM(ctx context.Context, m store.IngestMeta, r io.Reader) (int64, error) {
+	if q.sboms == nil {
+		return 0, errors.New("sbom storage is not configured")
+	}
+	if q.cfg.MaxQueued > 0 {
+		s, err := q.Stats(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if s.Queued >= q.cfg.MaxQueued {
+			return 0, fmt.Errorf("%w: %d jobs queued", ErrBusy, s.Queued)
+		}
+	}
+	if free, err := q.sboms.Free(); err == nil && free < q.cfg.MinFreeBytes {
+		return 0, fmt.Errorf("%w: %d MB free for SBOMs", ErrBusy, free>>20)
+	}
+	sha, size, err := q.sboms.Put(r)
+	if err != nil {
+		return 0, err
+	}
+	res, err := q.client.Insert(ctx, MatchSBOMArgs{SHA256: sha, Size: size, Host: m.Host, Target: m.Target,
+		RunID: m.RunID, Meta: m}, nil)
+	if err != nil {
+		return 0, err
+	}
+	return res.Job.ID, nil
+}
+
+func (q *Queue) event(ctx context.Context, level string, m store.IngestMeta, msg string) {
+	if err := q.st.AddEvent(ctx, store.Event{Level: level, Source: "scanner", Host: m.Host, RunID: m.RunID,
+		Message: msg}); err != nil {
+		q.log.Error("add event", "err", err)
+	}
 }
 
 // Stats counts jobs by state for the system page.

@@ -59,6 +59,7 @@ scripts/e2e.sh                     # asserts the known CVEs, triage, central sca
 
 1. `POST /api/v1/ingest/run` with `status=started` reports host facts (OS, arch, IP, agent version, interval).
 2. For each target, the agent runs `grype -o json`, gzips the output and sends `POST /api/v1/ingest/report?host=…&target=…` with `Content-Encoding: gzip`. If the upload fails, the report goes to a local spool (`/var/lib/labwarden/spool`, at most 20 reports) and is re-sent on the next run.
+   Agents that send a Syft JSON SBOM instead use `POST /api/v1/ingest/sbom` with the same parameters. The server stores the SBOM, answers `202 {queued, job_id}` at once and matches it on its job queue; a retry of the same run and target is not matched twice. It answers `503` when the queue is backed up or less than 1 GB of disk is free.
 3. Warnings and errors go to `POST /api/v1/ingest/event` and show up under **Logs**. These include Grype failures, DB update problems and uploads that never arrive.
 4. `POST /api/v1/ingest/run` with `status=ok|error` closes the run with the list of targets. On a successful run, targets the agent no longer reports (for example a removed container) are **retired** from the dashboard.
 
@@ -97,10 +98,12 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 |---|---|---|
 | `LABWARDEN_ADMIN_PASSWORD` | *(empty: UI open)* | Password for the web UI. Always set it. |
 | `LABWARDEN_INGEST_TOKEN` | | Optional bootstrap ingest token (at least 16 characters) |
-| `LABWARDEN_DATA` | `/data` | SQLite database, session key, Grype DB |
+| `LABWARDEN_DATA` | `/data` | SQLite database, job queue (`queue.db`), stored SBOMs, session key, Grype DB |
 | `LABWARDEN_ADDR` | `:8080` | |
 | `LABWARDEN_COOKIE_SECURE` | `false` | Set to `true` behind HTTPS |
 | `LABWARDEN_MAX_REPORT_MB` | `256` | Maximum decompressed report size |
+| `LABWARDEN_SCAN_WORKERS` | `2` | Grype processes run at once (about 115 MB each) |
+| `LABWARDEN_QUEUE_MAX` | `1000` | Queued jobs above which SBOM uploads get `503` and stay in the agent's spool |
 | `LABWARDEN_EVENT_RETENTION` | `50000` | Number of log events kept |
 | `LABWARDEN_SCHEDULER` | `true` | Central registry scans and DB updates |
 | `LABWARDEN_NOTIFY_URL` | *(empty: off)* | Webhook for alerts. Never logged or shown in the UI. |

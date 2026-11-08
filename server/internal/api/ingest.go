@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/amanahlab/labwarden/server/internal/grype"
+	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
@@ -76,13 +77,34 @@ func (s *Server) body(w http.ResponseWriter, r *http.Request) (io.ReadCloser, er
 		if err != nil {
 			return nil, fmt.Errorf("invalid gzip body: %w", err)
 		}
-		// Bound the decompressed size too (gzip bombs).
+		// Bound the decompressed size too (gzip bombs), failing rather than truncating.
 		return struct {
 			io.Reader
 			io.Closer
-		}{io.LimitReader(gz, limit*4), gz}, nil
+		}{&capReader{r: gz, n: limit * 4}, gz}, nil
 	}
 	return rc, nil
+}
+
+// capReader fails with *http.MaxBytesError once more than n bytes are read.
+type capReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *capReader) Read(p []byte) (int, error) {
+	if c.n < 0 {
+		return 0, &http.MaxBytesError{}
+	}
+	if int64(len(p)) > c.n+1 {
+		p = p[:c.n+1]
+	}
+	n, err := c.r.Read(p)
+	c.n -= int64(n)
+	if c.n < 0 {
+		return n, &http.MaxBytesError{}
+	}
+	return n, err
 }
 
 func (s *Server) ingestReport(w http.ResponseWriter, r *http.Request) {
@@ -119,8 +141,9 @@ func (s *Server) ingestReport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, res)
 }
 
-// ingestSBOM accepts a Syft JSON SBOM and scans it centrally, so agents
-// only need syft and the server holds the single vulnerability DB.
+// ingestSBOM accepts a Syft JSON SBOM and queues it for matching, so agents
+// only need syft and the server holds the single vulnerability DB. It answers
+// 202 as soon as the SBOM is on disk; findings follow within seconds.
 func (s *Server) ingestSBOM(w http.ResponseWriter, r *http.Request) {
 	m, err := metaFromQuery(r)
 	if err != nil {
@@ -133,15 +156,21 @@ func (s *Server) ingestSBOM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer body.Close()
-	res, err := s.scan.ScanSBOM(r.Context(), m, body)
-	if err != nil {
-		s.event(r, "error", "scanner", m.Host, m.RunID, "SBOM scan failed: "+err.Error())
-		writeErr(w, http.StatusUnprocessableEntity, "sbom scan failed: "+err.Error())
-		return
+	id, err := s.jobs.SubmitSBOM(r.Context(), m, body)
+	var mbe *http.MaxBytesError
+	switch {
+	case errors.As(err, &mbe):
+		writeErr(w, http.StatusRequestEntityTooLarge, "sbom too large")
+	case errors.Is(err, jobs.ErrBusy):
+		s.event(r, "warn", "ingest", m.Host, m.RunID, "SBOM refused: "+err.Error())
+		w.Header().Set("Retry-After", "300")
+		writeErr(w, http.StatusServiceUnavailable, err.Error())
+	case err != nil:
+		s.event(r, "error", "ingest", m.Host, m.RunID, "failed to queue SBOM: "+err.Error())
+		writeErr(w, http.StatusBadRequest, "sbom upload failed: "+err.Error())
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]any{"queued": true, "job_id": id})
 	}
-	s.event(r, "info", "scanner", m.Host, m.RunID, fmt.Sprintf("scanned SBOM for %s: %d findings (%d new, %d fixed)",
-		res.Target, res.Findings, res.New, res.Fixed))
-	writeJSON(w, http.StatusCreated, res)
 }
 
 type eventIn struct {

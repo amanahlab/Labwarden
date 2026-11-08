@@ -10,9 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -28,7 +26,6 @@ type Scanner struct {
 	st      *store.Store
 	log     *slog.Logger
 	timeout time.Duration
-	sem     chan struct{} // bounds concurrent grype processes
 
 	dbDir    string       // grype's cache dir; see db.go
 	dbLock   sync.RWMutex // scans read-lock; swapping in a new DB write-locks
@@ -49,8 +46,7 @@ type Status struct {
 }
 
 func New(bin string, st *store.Store, log *slog.Logger) *Scanner {
-	return &Scanner{bin: bin, st: st, log: log, timeout: 20 * time.Minute, dbDir: grypeDBDir(),
-		sem: make(chan struct{}, 2)}
+	return &Scanner{bin: bin, st: st, log: log, timeout: 20 * time.Minute, dbDir: grypeDBDir()}
 }
 
 func (s *Scanner) Status() Status {
@@ -105,22 +101,10 @@ func (s *Scanner) ScanCentral(ctx context.Context, id int64) error {
 	return err
 }
 
-// ScanSBOM scans an uploaded Syft SBOM and stores the result.
-func (s *Scanner) ScanSBOM(ctx context.Context, m store.IngestMeta, r io.Reader) (*store.IngestResult, error) {
-	f, err := os.CreateTemp("", "labwarden-sbom-*.json")
-	if err != nil {
-		return nil, err
-	}
-	defer os.Remove(f.Name())
-	if _, err := io.Copy(f, r); err != nil {
-		f.Close()
-		return nil, err
-	}
-	if err := f.Close(); err != nil {
-		return nil, err
-	}
+// MatchSBOM matches a Syft SBOM file against the DB and stores the result.
+func (s *Scanner) MatchSBOM(ctx context.Context, m store.IngestMeta, path string) (*store.IngestResult, error) {
 	start := time.Now()
-	rep, err := s.grype(ctx, "sbom:"+f.Name())
+	rep, err := s.grype(ctx, "sbom:"+path)
 	if err != nil {
 		return nil, err
 	}
@@ -129,18 +113,14 @@ func (s *Scanner) ScanSBOM(ctx context.Context, m store.IngestMeta, r io.Reader)
 		m.DurationMS = time.Since(start).Milliseconds()
 	}
 	if m.Target == "" {
-		m.Target = "sbom"
+		m.Target = "sbom" // grype would name it after the temp file
 	}
 	return s.st.IngestReport(ctx, m, rep)
 }
 
+// grype runs one scan. Callers are jobs on the scan queue, whose MaxWorkers
+// bounds how many run at once.
 func (s *Scanner) grype(ctx context.Context, source string) (*grype.Report, error) {
-	select {
-	case s.sem <- struct{}{}:
-		defer func() { <-s.sem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 	if !s.HasDB() {
 		return nil, errors.New("the vulnerability DB has not been downloaded yet; try again later")
 	}

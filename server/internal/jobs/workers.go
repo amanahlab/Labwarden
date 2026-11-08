@@ -2,11 +2,14 @@ package jobs
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
 
 	"github.com/riverqueue/river"
 
 	"github.com/amanahlab/labwarden/server/internal/scanner"
+	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 // CentralScanArgs scans a central (registry) target.
@@ -87,5 +90,55 @@ func (w *scheduleWorker) Work(ctx context.Context, _ *river.Job[ScheduleArgs]) e
 			return err
 		}
 	}
+	return nil
+}
+
+// MatchSBOMArgs matches an uploaded SBOM, stored by sboms.Files, and ingests
+// the result. An agent retrying the same upload of a run is matched once.
+type MatchSBOMArgs struct {
+	SHA256 string           `json:"sha256" river:"unique"`
+	Size   int64            `json:"size"`
+	Host   string           `json:"host" river:"unique"`
+	Target string           `json:"target" river:"unique"`
+	RunID  string           `json:"run_id" river:"unique"`
+	Meta   store.IngestMeta `json:"meta"`
+}
+
+func (MatchSBOMArgs) Kind() string { return "match_sbom" }
+
+// Fresh uploads go ahead of central scans and re-matches.
+func (MatchSBOMArgs) InsertOpts() river.InsertOpts {
+	return river.InsertOpts{Queue: QueueScan, Priority: 1, MaxAttempts: 5,
+		UniqueOpts: river.UniqueOpts{ByArgs: true, ByState: pendingStates}}
+}
+
+type matchSBOMWorker struct {
+	river.WorkerDefaults[MatchSBOMArgs]
+	q *Queue
+}
+
+func (w *matchSBOMWorker) Timeout(*river.Job[MatchSBOMArgs]) time.Duration { return 10 * time.Minute }
+
+func (w *matchSBOMWorker) Work(ctx context.Context, job *river.Job[MatchSBOMArgs]) error {
+	if !w.q.sc.HasDB() {
+		return river.JobSnooze(noDBSnooze)
+	}
+	a := job.Args
+	path, err := w.q.sboms.Extract(a.SHA256)
+	if err != nil {
+		return fmt.Errorf("sbom of %s/%s: %w", a.Host, a.Target, err)
+	}
+	defer os.Remove(path)
+	res, err := w.q.sc.MatchSBOM(ctx, a.Meta, path)
+	if err != nil { // the error handler records the final failure
+		return fmt.Errorf("match %s/%s: %w", a.Host, a.Target, err)
+	}
+	m := a.Meta
+	m.Target = res.Target
+	if err := w.q.st.SetTargetSBOM(ctx, res.TargetID, a.SHA256, a.Size, m); err != nil {
+		return err
+	}
+	w.q.event(ctx, "info", a.Meta, fmt.Sprintf("matched SBOM for %s: %d findings (%d new, %d fixed)",
+		res.Target, res.Findings, res.New, res.Fixed))
 	return nil
 }

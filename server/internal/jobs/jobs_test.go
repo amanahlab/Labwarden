@@ -2,13 +2,16 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/amanahlab/labwarden/server/internal/sboms"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
@@ -50,8 +53,12 @@ func setup(t *testing.T, withDB bool) (*Queue, *store.Store) {
 	if err := sc.UpdateDB(context.Background()); err != nil { // finds the fake DB
 		t.Fatal(err)
 	}
+	sb, err := sboms.New(filepath.Join(dir, "sboms"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	q, err := Open(context.Background(), Config{Path: filepath.Join(dir, "queue.db"), ScanWorkers: 2,
-		Scheduler: true, DBUpdateEvery: time.Hour}, st, sc, log)
+		Scheduler: true, DBUpdateEvery: time.Hour, SBOMs: sb}, st, sc, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,5 +137,39 @@ func TestScansWaitForTheFirstDB(t *testing.T) {
 	})
 	if got, _ := st.GetCentralTarget(ctx, c.ID); got.LastStatus != "" {
 		t.Fatalf("scan ran without a DB: %q", got.LastStatus)
+	}
+}
+
+func TestSubmittedSBOMIsMatchedAndKept(t *testing.T) {
+	q, st := setup(t, true)
+	ctx := context.Background()
+	if err := q.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	m := store.IngestMeta{Host: "vm1", Kind: "vm", Target: "/", RunID: "r1", Source: "agent"}
+	if _, err := q.SubmitSBOM(ctx, m, strings.NewReader(`{"artifacts":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	var targetID int64
+	waitFor(t, "matched SBOM stored for its target", func() bool {
+		ids, err := st.LiveSBOMTargets(ctx)
+		if err != nil || len(ids) != 1 {
+			return false
+		}
+		targetID = ids[0]
+		return true
+	})
+	sha, got, err := st.TargetSBOM(ctx, targetID)
+	if err != nil || len(sha) != 64 || got.Host != "vm1" || got.Target != "/" {
+		t.Fatalf("target sbom = %q %+v %v", sha, got, err)
+	}
+}
+
+func TestSubmitSBOMRefusesWhenTheDiskIsFull(t *testing.T) {
+	q, _ := setup(t, true)
+	q.cfg.MinFreeBytes = 1 << 62
+	_, err := q.SubmitSBOM(context.Background(), store.IngestMeta{Host: "vm1"}, strings.NewReader("{}"))
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("err = %v, want ErrBusy", err)
 	}
 }

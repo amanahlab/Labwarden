@@ -18,6 +18,7 @@ import (
 	"github.com/amanahlab/labwarden/server/internal/api"
 	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/notify"
+	"github.com/amanahlab/labwarden/server/internal/sboms"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
 	"github.com/amanahlab/labwarden/web"
@@ -83,11 +84,20 @@ func run(log *slog.Logger) error {
 
 	sc := scanner.New(env("LABWARDEN_GRYPE_BIN", "grype"), st, log)
 	sc.Init(ctx)
+	sb, err := sboms.New(filepath.Join(dataDir, "sboms"))
+	if err != nil {
+		return err
+	}
+	workers, _ := strconv.Atoi(env("LABWARDEN_SCAN_WORKERS", "2"))
+	maxQueued, _ := strconv.Atoi(env("LABWARDEN_QUEUE_MAX", "1000"))
 	q, err := jobs.Open(ctx, jobs.Config{
 		Path:          filepath.Join(dataDir, "queue.db"),
-		ScanWorkers:   2,
+		ScanWorkers:   workers,
 		Scheduler:     env("LABWARDEN_SCHEDULER", "true") == "true",
 		DBUpdateEvery: 6 * time.Hour,
+		SBOMs:         sb,
+		MaxQueued:     maxQueued,
+		MinFreeBytes:  1 << 30,
 	}, st, sc, log)
 	if err != nil {
 		return err

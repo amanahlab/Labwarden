@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -21,13 +23,15 @@ import (
 
 	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/notify"
+	"github.com/amanahlab/labwarden/server/internal/sboms"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
 
 const (
-	testPassword = "correct horse battery staple"
-	testToken    = "vx_test_token_0123456789abcdef"
+	testPassword  = "correct horse battery staple"
+	testToken     = "vx_test_token_0123456789abcdef"
+	testMaxQueued = 3
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
@@ -48,7 +52,13 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 		t.Fatal(err)
 	}
 	sc := scanner.New("grype-not-installed", st, log)
-	q, err := jobs.Open(context.Background(), jobs.Config{Path: filepath.Join(t.TempDir(), "queue.db"), DBUpdateEvery: time.Hour}, st, sc, log)
+	sb, err := sboms.New(filepath.Join(t.TempDir(), "sboms"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The queue is never started, so uploads stay queued: MaxQueued is reachable.
+	q, err := jobs.Open(context.Background(), jobs.Config{Path: filepath.Join(t.TempDir(), "queue.db"),
+		DBUpdateEvery: time.Hour, SBOMs: sb, MaxQueued: testMaxQueued}, st, sc, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,5 +277,62 @@ func TestMissingAssetIs404(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusOK || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") {
 		t.Fatalf("client route: %d %s", res.StatusCode, res.Header.Get("Content-Type"))
+	}
+}
+
+func uploadSBOM(t *testing.T, ts *httptest.Server, target, run string, body []byte) (int, map[string]any) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/ingest/sbom?host=h1&kind=vm&run_id="+run+
+		"&target="+url.QueryEscape(target), bytes.NewReader(gz(t, body)))
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Encoding", "gzip")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return resp.StatusCode, out
+}
+
+func TestIngestSBOMQueuesWithBackpressure(t *testing.T) {
+	ts, _ := newTestServer(t)
+	sbom := []byte(`{"artifacts":[],"source":{"type":"directory"}}`)
+	start := time.Now()
+	code, out := uploadSBOM(t, ts, "/a", "r1", sbom)
+	if code != http.StatusAccepted || out["queued"] != true || out["job_id"] == nil {
+		t.Fatalf("status %d, body %v", code, out)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("upload took %s; it should only queue", d)
+	}
+	// A retry of the same run and target is the same job, not a second one.
+	if _, again := uploadSBOM(t, ts, "/a", "r1", sbom); again["job_id"] != out["job_id"] {
+		t.Fatalf("retry got job %v, want %v", again["job_id"], out["job_id"])
+	}
+	for i := 1; i < testMaxQueued; i++ {
+		if code, _ := uploadSBOM(t, ts, fmt.Sprintf("/t%d", i), "r1", sbom); code != http.StatusAccepted {
+			t.Fatalf("upload %d: status %d", i, code)
+		}
+	}
+	if code, _ := uploadSBOM(t, ts, "/over", "r1", sbom); code != http.StatusServiceUnavailable {
+		t.Fatalf("over the backlog limit: status %d, want 503", code)
+	}
+	if code, _ := uploadSBOM(t, ts, "/empty", "r1", nil); code != http.StatusBadRequest && code != http.StatusServiceUnavailable {
+		t.Fatalf("empty sbom: status %d", code)
+	}
+}
+
+func TestCapReaderFailsInsteadOfTruncating(t *testing.T) {
+	r := &capReader{r: strings.NewReader("0123456789"), n: 5}
+	_, err := io.ReadAll(r)
+	var mbe *http.MaxBytesError
+	if !errors.As(err, &mbe) {
+		t.Fatalf("err = %v, want MaxBytesError", err)
+	}
+	got, err := io.ReadAll(&capReader{r: strings.NewReader("01234"), n: 5})
+	if err != nil || string(got) != "01234" {
+		t.Fatalf("at the limit: %q, %v", got, err)
 	}
 }

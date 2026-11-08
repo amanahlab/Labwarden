@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -124,4 +125,13 @@ func (f *Files) GC(keep map[string]bool, grace time.Duration) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// Free returns the bytes available to unprivileged writers on the SBOM disk.
+func (f *Files) Free() (uint64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(f.dir, &st); err != nil {
+		return 0, err
+	}
+	return st.Bavail * uint64(st.Bsize), nil
 }
