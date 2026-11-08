@@ -193,8 +193,18 @@ query_for() { # query_for <target-name> <duration-ms>
 		"$(urlenc "$(host_ip)")" "$AGENT_VERSION" "$LABWARDEN_INTERVAL" "$RUN_ID" "$(urlenc "$1")" "$2"
 }
 
-upload() { # upload <gz-file> <query> [endpoint]: the server answers 202 and matches it in the background
-	api "/api/v1/ingest/${3:-sbom}?$2" application/json "$1" -H "Content-Encoding: gzip" -o "$WORK/resp.json"
+# upload <gz-file> <query> [endpoint]: the server answers 202 and matches it in
+# the background. Returns 2 when the server rejects the content itself (bad or
+# too large), which no retry can fix; 1 for anything worth retrying later.
+upload() {
+	_code=$(api "/api/v1/ingest/${3:-sbom}?$2" application/json "$1" -H "Content-Encoding: gzip" \
+		-o "$WORK/resp.json" -w '%{http_code}') && return 0
+	case "$_code" in 400 | 413 | 415 | 422) return 2 ;; esac
+	return 1
+}
+
+rejected() { # rejected <what>: why the server refused the last upload
+	printf 'rejected %s (HTTP %s: %s)' "$1" "$_code" "$(head -c 300 "$WORK/resp.json" 2>/dev/null)"
 }
 
 # Re-send SBOMs that failed to upload on an earlier run. *.sbom.gz are SBOMs;
@@ -207,6 +217,9 @@ flush_spool() {
 		if upload "$f" "$(cat "$_base.query")" "$_ep" 2>/dev/null; then
 			rm -f "$f" "$_base.query"
 			event info "uploaded spooled $_ep $(basename "$f")"
+		elif [ $? -eq 2 ]; then
+			rm -f "$f" "$_base.query" # would block every newer spooled upload forever
+			event error "dashboard $(rejected "spooled $_ep $(basename "$f")"); dropped it"
 		else
 			log warn "dashboard unreachable or busy; keeping spooled uploads"
 			return 0
@@ -242,6 +255,9 @@ scan() {
 	_q=$(query_for "$_name" "$_dur")
 	if upload "$WORK/sbom.json.gz" "$_q" 2>"$WORK/curl.err"; then
 		log info "uploaded $_name: $(cat "$WORK/resp.json")"
+	elif [ $? -eq 2 ]; then
+		event error "dashboard $(rejected "the SBOM of $_name")"
+		return 1
 	else
 		spool "$WORK/sbom.json.gz" "$_q"
 		log error "upload of $_name failed ($(cat "$WORK/curl.err")); SBOM spooled for the next run"
