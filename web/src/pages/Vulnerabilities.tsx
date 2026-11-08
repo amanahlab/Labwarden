@@ -151,11 +151,12 @@ export function VulnerabilitiesPage() {
 
 type PS = ReturnType<typeof useParamsState>
 
-// drill links to the package-instance view narrowed by patch, keeping the
-// other filters; sort and page reset because the columns differ.
+// drill links to the package-instance view narrowed by patch, keeping every
+// other filter so its count matches the row; sort and page reset because the
+// columns differ.
 function drill(ps: PS, patch: Record<string, string | number>) {
   const n = new URLSearchParams(ps.sp)
-  for (const k of ["sort", "order", "page", "host_id", "target_id", "location"]) n.delete(k)
+  for (const k of ["sort", "order", "page"]) n.delete(k)
   n.set("view", "findings")
   for (const [k, v] of Object.entries(patch)) n.set(k, String(v))
   return `?${n}`
@@ -254,13 +255,19 @@ function LocationTable({ ps, data, loading }: { ps: PS; data?: List<LocationRow>
         {loading && <LoadingRows cols={8} />}
         {data?.items.map((l) => (
           <Table.Row key={`${l.target_id}:${l.location}`}>
-            <Table.Cell maxW="80">
-              <CLink asChild fontFamily="mono" textStyle="xs" title={l.location}>
-                {/* An empty path can't be a filter value, so it drills to the whole target. */}
-                <Link to={drill(ps, l.location ? { host_id: l.host_id, target_id: l.target_id, location: l.location } : { host_id: l.host_id, target_id: l.target_id })}>
-                  <Text truncate>{l.location || "— (no path)"}</Text>
-                </Link>
-              </CLink>
+            <Table.Cell>
+              {/* An empty path can't be expressed as a filter, so that row has no drill-down. */}
+              {l.location ? (
+                <CLink asChild title={l.location}>
+                  <Link to={drill(ps, { host_id: l.host_id, target_id: l.target_id, location: l.location })}>
+                    <Mono truncate maxW="80">
+                      {l.location}
+                    </Mono>
+                  </Link>
+                </CLink>
+              ) : (
+                <Text color="fg.muted">— (no path)</Text>
+              )}
             </Table.Cell>
             <Table.Cell maxW="56">
               <Stack gap="0">
