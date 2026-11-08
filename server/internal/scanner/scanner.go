@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/amanahlab/labwarden/server/internal/grype"
@@ -27,6 +28,10 @@ type Scanner struct {
 	timeout time.Duration
 	queue   chan int64
 	sem     chan struct{} // bounds concurrent grype processes
+
+	dbDir    string       // grype's cache dir; see db.go
+	dbLock   sync.RWMutex // scans read-lock; swapping in a new DB write-locks
+	updating atomic.Bool  // a DB update is running
 
 	mu      sync.Mutex
 	pending map[int64]bool
@@ -45,7 +50,7 @@ type Status struct {
 }
 
 func New(bin string, st *store.Store, log *slog.Logger) *Scanner {
-	return &Scanner{bin: bin, st: st, log: log, timeout: 20 * time.Minute,
+	return &Scanner{bin: bin, st: st, log: log, timeout: 20 * time.Minute, dbDir: grypeDBDir(),
 		queue: make(chan int64, 256), sem: make(chan struct{}, 2), pending: map[int64]bool{}}
 }
 
@@ -76,6 +81,7 @@ func (s *Scanner) Enqueue(id int64) bool {
 // Run drives the worker, scheduler and DB updates until ctx ends.
 func (s *Scanner) Run(ctx context.Context, schedule bool, dbUpdateEvery time.Duration) {
 	s.refreshVersion(ctx)
+	s.refreshDBStatus(ctx)
 	go s.worker(ctx)
 	go func() {
 		s.updateDB(ctx)
@@ -191,11 +197,16 @@ func (s *Scanner) grype(ctx context.Context, source string) (*grype.Report, erro
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+	if !s.hasDB() {
+		return nil, errors.New("the vulnerability DB has not been downloaded yet; try again later")
+	}
 	ctx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
+	s.dbLock.RLock()
+	defer s.dbLock.RUnlock()
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, s.bin, source, "-o", "json", "-q")
-	cmd.Env = append(os.Environ(), "GRYPE_CHECK_FOR_APP_UPDATE=false")
+	cmd.Env = grypeEnv(s.dbDir)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
@@ -221,36 +232,6 @@ func (s *Scanner) refreshVersion(ctx context.Context) {
 	_ = json.Unmarshal(out, &v)
 	s.status.Available = true
 	s.status.GrypeVersion = v.Version
-}
-
-func (s *Scanner) updateDB(ctx context.Context) {
-	if !s.Status().Available {
-		return
-	}
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-	defer cancel()
-	out, err := exec.CommandContext(cctx, s.bin, "db", "update").CombinedOutput()
-	if err != nil {
-		s.mu.Lock()
-		s.status.DBError = trim(string(out), 500)
-		s.mu.Unlock()
-		s.event(ctx, "error", "", "grype DB update failed: "+trim(string(out), 1000))
-		return
-	}
-	st, _ := exec.CommandContext(cctx, s.bin, "db", "status", "-o", "json").Output()
-	var ds struct {
-		SchemaVersion string `json:"schemaVersion"`
-		Built         string `json:"built"`
-	}
-	_ = json.Unmarshal(st, &ds)
-	s.mu.Lock()
-	changed := ds.Built != "" && ds.Built != s.status.DBBuilt
-	s.status.DBBuilt, s.status.DBSchema, s.status.DBError = ds.Built, ds.SchemaVersion, ""
-	s.status.DBChecked = time.Now().UTC().Format(time.RFC3339)
-	s.mu.Unlock()
-	if changed {
-		s.event(ctx, "info", "", "grype vulnerability DB is current (built "+ds.Built+")")
-	}
 }
 
 func (s *Scanner) event(ctx context.Context, level, host, msg string) {
