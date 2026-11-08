@@ -73,6 +73,8 @@ A host that misses more than 2.5× its reported interval is marked **stale**. A 
 
 Create a token in **Settings → Ingest tokens**, then follow the snippets on that page. They are pre-filled with the dashboard URL.
 
+When upgrading, upgrade the server first. A 2.0 agent sends SBOMs to `/api/v1/ingest/sbom`, which older servers lack. The agent keeps those SBOMs in its spool until the server is upgraded. A new server still accepts reports from older agents.
+
 ```bash
 # Linux VM (systemd or cron)
 curl -fsSL http://labwarden.lan:8080/install.sh | sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh
