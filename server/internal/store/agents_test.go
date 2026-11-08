@@ -130,3 +130,22 @@ func TestDeleteHostEndsCredential(t *testing.T) {
 		t.Fatalf("credential of a deleted host: %v, want ErrUnauthorized", err)
 	}
 }
+
+// Tokens created before enrollment existed have only the original columns;
+// they must list and enroll like a non-expiring token.
+func TestTokenFromBeforeEnrollmentEnrolls(t *testing.T) {
+	ctx := context.Background()
+	s := openTest(t)
+	const old = "vx_an_old_ingest_token_0123456789"
+	if _, err := s.w.ExecContext(ctx, `INSERT INTO tokens(name, prefix, hash, created_at) VALUES('old', 'vx_an_o', ?, ?)`,
+		hashToken(old), now()); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListTokens(ctx)
+	if err != nil || len(list) != 1 || list[0].ExpiresAt != "" || list[0].RevokedAt != "" || list[0].MaxUses != 0 {
+		t.Fatalf("tokens = %+v, %v", list, err)
+	}
+	if _, err := s.Enroll(ctx, old, "vm-1", ""); err != nil {
+		t.Fatalf("enroll with an old token: %v", err)
+	}
+}
