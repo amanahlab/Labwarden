@@ -403,6 +403,30 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// updateDB queues a check for a new vulnerability DB; a new one re-matches everything.
+func (s *Server) updateDB(w http.ResponseWriter, r *http.Request) {
+	queued, err := s.jobs.EnqueueDBUpdate(r.Context())
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
+	if !queued {
+		writeErr(w, http.StatusConflict, "a DB update is already queued or running")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
+}
+
+// rematchAll re-matches every stored SBOM against the current DB.
+func (s *Server) rematchAll(w http.ResponseWriter, r *http.Request) {
+	n, err := s.jobs.EnqueueRematches(r.Context())
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]int{"targets": n})
+}
+
 func (s *Server) testNotify(w http.ResponseWriter, r *http.Request) {
 	if err := s.notify.Test(r.Context()); err != nil {
 		writeErr(w, http.StatusBadGateway, err.Error())

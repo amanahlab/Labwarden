@@ -216,7 +216,14 @@ export interface SystemInfo {
     db_error?: string
     running?: string
   }
-  queue: { queued: number; running: number; failed_24h: number }
+  queue: {
+    queued: number
+    running: number
+    failed_24h: number
+    rematching: number
+    last_rematch?: string
+    next_db_update: string
+  }
 }
 
 export interface Me {

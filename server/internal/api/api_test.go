@@ -336,3 +336,35 @@ func TestCapReaderFailsInsteadOfTruncating(t *testing.T) {
 		t.Fatalf("at the limit: %q, %v", got, err)
 	}
 }
+
+func TestUpdateDBNowIsQueuedOnce(t *testing.T) {
+	ts, _ := newTestServer(t)
+	post := func(c *http.Client, path string) int {
+		resp, err := c.Post(ts.URL+path, "application/json", strings.NewReader("{}"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post(http.DefaultClient, "/api/v1/db/update"); code != http.StatusUnauthorized {
+		t.Fatalf("anonymous: status %d, want 401", code)
+	}
+	c := login(t, ts, testPassword)
+	for i, want := range []int{http.StatusAccepted, http.StatusConflict} {
+		if code := post(c, "/api/v1/db/update"); code != want {
+			t.Fatalf("request %d: status %d, want %d", i, code, want)
+		}
+	}
+	if code := post(c, "/api/v1/rematch"); code != http.StatusAccepted {
+		t.Fatalf("rematch: status %d", code)
+	}
+	var sys struct {
+		Queue struct {
+			NextDBUpdate string `json:"next_db_update"`
+		} `json:"queue"`
+	}
+	if code := getJSON(t, c, ts.URL+"/api/v1/system", &sys); code != http.StatusOK || sys.Queue.NextDBUpdate == "" {
+		t.Fatalf("system: status %d, next_db_update %q", code, sys.Queue.NextDBUpdate)
+	}
+}

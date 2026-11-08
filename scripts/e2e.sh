@@ -59,6 +59,16 @@ agent_matched_within 15 testbed-vm:testbed-vm
 wait_for 60 "testbed-vm reported findings" host_id testbed-vm
 wait_for 60 "testbed-docker reported findings" host_id testbed-docker
 
+echo "== re-match without an agent run"
+last_seen() { api "$URL/api/v1/hosts?q=$1" | jqr -r --arg n "$1" '.items[] | select(.name == $n) | .last_seen'; }
+vm_seen=$(last_seen testbed-vm)
+since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+api -X POST "$URL/api/v1/rematch" | jqr -e '.targets >= 2' >/dev/null || fail "re-match queued too few targets"
+wait_for 120 "testbed-vm re-matched" matched_since testbed-vm "$since"
+wait_for 120 "testbed-docker re-matched" matched_since testbed-docker "$since"
+[ "$(last_seen testbed-vm)" = "$vm_seen" ] || fail "re-match moved testbed-vm's last_seen"
+pass "re-match left last_seen alone"
+
 has_vuln() { # has_vuln <query> <jq filter on items>
   api "$URL/api/v1/vulnerabilities?q=$1&status=all&size=100" | jqr -e "[.items[] | $2] | any" >/dev/null || fail "expected $1 ($2)"
   pass "found $1"
@@ -117,6 +127,8 @@ pass "agents keep no grype DB"
 dbdirs=$(docker compose exec -T labwarden sh -c 'ls -A /data/grype-db')
 [ "$dbdirs" = "6" ] || fail "server grype-db holds: $(echo $dbdirs)"
 pass "server holds exactly one grype DB (no download leftovers)"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$JAR" -X POST "$URL/api/v1/db/update")
+case "$code" in 202 | 409) pass "Update DB now accepted ($code)" ;; *) fail "Update DB now: status $code" ;; esac
 
 echo "== logs"
 api "$URL/api/v1/events?source=agent&size=1" | jqr -e '.total > 0' >/dev/null || fail "no agent events"

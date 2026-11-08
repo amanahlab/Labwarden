@@ -69,7 +69,7 @@ func (w *dbUpdateWorker) Work(ctx context.Context, job *river.Job[DBUpdateArgs])
 	if err != nil || !updated {
 		return err
 	}
-	n, err := w.q.enqueueRematches(ctx)
+	n, err := w.q.EnqueueRematches(ctx)
 	if err != nil {
 		return fmt.Errorf("queue re-matches: %w", err)
 	}

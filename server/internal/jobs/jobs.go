@@ -81,6 +81,7 @@ type Queue struct {
 	sc     *scanner.Scanner
 	sboms  *sboms.Files
 	log    *slog.Logger
+	daily  cron.Schedule // the DB update
 }
 
 // Open opens queue.db, migrates River's schema and builds the client; Start runs it.
@@ -108,7 +109,7 @@ func Open(ctx context.Context, cfg Config, st *store.Store, sc *scanner.Scanner,
 		db.Close()
 		return nil, err
 	}
-	q := &Queue{cfg: cfg, db: db, st: st, sc: sc, sboms: cfg.SBOMs, log: log}
+	q := &Queue{cfg: cfg, db: db, st: st, sc: sc, sboms: cfg.SBOMs, log: log, daily: daily}
 	workers := river.NewWorkers()
 	river.AddWorker(workers, &centralScanWorker{sc: sc})
 	river.AddWorker(workers, &dbUpdateWorker{q: q})
@@ -194,8 +195,9 @@ func (q *Queue) EnqueueCentral(ctx context.Context, id int64) (bool, error) {
 	return !res.UniqueSkippedAsDuplicate, nil
 }
 
-// enqueueRematches queues a re-match of every live target with a stored SBOM.
-func (q *Queue) enqueueRematches(ctx context.Context) (int, error) {
+// EnqueueRematches queues a re-match of every live target with a stored
+// SBOM; a target whose re-match is already pending is not queued twice.
+func (q *Queue) EnqueueRematches(ctx context.Context) (int, error) {
 	ids, err := q.st.LiveSBOMTargets(ctx)
 	if err != nil {
 		return 0, err
@@ -256,18 +258,23 @@ func (q *Queue) event(ctx context.Context, level string, m store.IngestMeta, msg
 
 // Stats counts jobs by state for the system page.
 type Stats struct {
-	Queued   int `json:"queued"` // available, scheduled or waiting to retry
-	Running  int `json:"running"`
-	Failed24 int `json:"failed_24h"` // gave up in the last 24 hours
+	Queued       int    `json:"queued"` // available, scheduled or waiting to retry
+	Running      int    `json:"running"`
+	Failed24     int    `json:"failed_24h"` // gave up in the last 24 hours
+	Rematching   int    `json:"rematching"` // re-matches queued or running
+	LastRematch  string `json:"last_rematch,omitempty"` // within CompletedJobRetentionPeriod
+	NextDBUpdate string `json:"next_db_update"`
 }
 
 func (q *Queue) Stats(ctx context.Context) (Stats, error) {
-	var s Stats
+	s := Stats{NextDBUpdate: q.daily.Next(time.Now()).UTC().Format(time.RFC3339)}
 	err := q.db.QueryRowContext(ctx, `SELECT
 		COALESCE(SUM(state IN ('available','scheduled','retryable','pending')),0),
 		COALESCE(SUM(state = 'running'),0),
-		COALESCE(SUM(state = 'discarded' AND finalized_at > datetime('now','-1 day')),0)
-		FROM river_job`).Scan(&s.Queued, &s.Running, &s.Failed24)
+		COALESCE(SUM(state = 'discarded' AND finalized_at > datetime('now','-1 day')),0),
+		COALESCE(SUM(kind = 'rematch' AND state IN ('available','scheduled','retryable','pending','running')),0),
+		COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', MAX(CASE WHEN kind = 'rematch' AND state = 'completed' THEN finalized_at END)),'')
+		FROM river_job`).Scan(&s.Queued, &s.Running, &s.Failed24, &s.Rematching, &s.LastRematch)
 	return s, err
 }
 

@@ -23,7 +23,7 @@ import {
   Tabs,
   Text,
 } from "@chakra-ui/react"
-import { LuBell, LuKeyRound, LuPlay, LuPlus, LuTrash2 } from "react-icons/lu"
+import { LuBell, LuDownload, LuKeyRound, LuPlay, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu"
 import { api, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
 import { ago, dateTime } from "@/lib/format"
 import { DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel } from "@/components/common"
@@ -357,6 +357,37 @@ function NotifyStatus({ n }: { n: SystemInfo["notify"] }) {
   )
 }
 
+function DBActions() {
+  const qc = useQueryClient()
+  const refresh = () => qc.invalidateQueries({ queryKey: ["system"] })
+  const update = useMutation({
+    mutationFn: () => api.post("/db/update"),
+    onSuccess: () => {
+      toaster.create({ type: "info", title: "DB update queued", description: "A newer DB re-matches every target." })
+      refresh()
+    },
+    onError: onError("Could not queue the DB update"),
+  })
+  const rematch = useMutation({
+    mutationFn: () => api.post<{ targets: number }>("/rematch"),
+    onSuccess: (r) => {
+      toaster.create({ type: "info", title: `Re-matching ${r.targets} targets` })
+      refresh()
+    },
+    onError: onError("Could not queue the re-match"),
+  })
+  return (
+    <HStack gap="2" wrap="wrap" mt="1">
+      <Button size="xs" variant="outline" loading={update.isPending} onClick={() => update.mutate()}>
+        <LuDownload /> Update DB now
+      </Button>
+      <Button size="xs" variant="outline" loading={rematch.isPending} onClick={() => rematch.mutate()}>
+        <LuRefreshCw /> Re-match all now
+      </Button>
+    </HStack>
+  )
+}
+
 function SystemPanel() {
   const q = useQuery({ queryKey: ["system"], queryFn: () => api.get<SystemInfo>("/system"), refetchInterval: 15_000 })
   const s = q.data
@@ -399,11 +430,15 @@ function SystemPanel() {
                     schema {s.scanner.db_schema} · checked {ago(s.scanner.db_checked)}
                   </Text>
                 )}
+                <Text textStyle="xs" color="fg.muted">
+                  next update {dateTime(s.queue.next_db_update)} · last re-match {ago(s.queue.last_rematch)}
+                </Text>
                 {s.scanner.db_error && (
                   <Text textStyle="xs" color="fg.error">
                     {s.scanner.db_error}
                   </Text>
                 )}
+                <DBActions />
               </Stack>
             </DataList.ItemValue>
           </DataList.Item>
@@ -417,6 +452,11 @@ function SystemPanel() {
                     : "idle"}
                   {s.scanner.running && ` · scanning ${s.scanner.running}`}
                 </Text>
+                {s.queue.rematching > 0 && (
+                  <Text textStyle="xs" color="fg.muted">
+                    {s.queue.rematching} re-matches against the current DB pending
+                  </Text>
+                )}
                 {s.queue.failed_24h > 0 && (
                   <Text textStyle="xs" color="fg.error">
                     {s.queue.failed_24h} failed in the last 24 hours (see Logs)

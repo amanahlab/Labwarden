@@ -95,6 +95,8 @@ func (s *Server) Handler() http.Handler {
 			r.Delete("/central-targets/{id}", s.deleteCentral)
 			r.Post("/central-targets/{id}/scan", s.scanCentral)
 			r.Get("/system", s.system)
+			r.Post("/db/update", s.updateDB)
+			r.Post("/rematch", s.rematchAll)
 			r.Post("/notify/test", s.testNotify)
 		})
 		r.NotFound(func(w http.ResponseWriter, r *http.Request) { writeErr(w, http.StatusNotFound, "not found") })

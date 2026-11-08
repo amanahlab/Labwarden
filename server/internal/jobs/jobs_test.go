@@ -214,11 +214,16 @@ func TestRematchUsesTheStoredSBOMAndLeavesTheHostAlone(t *testing.T) {
 	before := host()
 	time.Sleep(1100 * time.Millisecond) // last_seen has second precision
 
-	n, err := q.enqueueRematches(ctx)
+	n, err := q.EnqueueRematches(ctx)
 	if err != nil || n != 1 {
 		t.Fatalf("queued %d re-matches, err %v; want 1", n, err)
 	}
 	waitFor(t, "re-match scan", func() bool { return scans() == 2 })
+	waitFor(t, "last re-match in stats", func() bool {
+		st, err := q.Stats(ctx)
+		_, perr := time.Parse(time.RFC3339, st.LastRematch)
+		return err == nil && perr == nil && st.Rematching == 0
+	})
 	if after := host(); after.LastSeen != before.LastSeen {
 		t.Fatalf("re-match moved last_seen from %s to %s", before.LastSeen, after.LastSeen)
 	}
