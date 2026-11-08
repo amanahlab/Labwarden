@@ -155,8 +155,8 @@ func (q *Queue) EnqueueDBUpdate(ctx context.Context) (bool, error) {
 
 // Stats counts jobs by state for the system page.
 type Stats struct {
-	Queued   int `json:"queued"`    // available, scheduled or waiting to retry
-	Running  int `json:"running"`   //
+	Queued   int `json:"queued"` // available, scheduled or waiting to retry
+	Running  int `json:"running"`
 	Failed24 int `json:"failed_24h"` // gave up in the last 24 hours
 }
 

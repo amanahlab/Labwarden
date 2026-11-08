@@ -16,8 +16,8 @@ import (
 
 	"github.com/amanahlab/labwarden/agent"
 	"github.com/amanahlab/labwarden/server/internal/api"
-	"github.com/amanahlab/labwarden/server/internal/notify"
 	"github.com/amanahlab/labwarden/server/internal/jobs"
+	"github.com/amanahlab/labwarden/server/internal/notify"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
 	"github.com/amanahlab/labwarden/web"
