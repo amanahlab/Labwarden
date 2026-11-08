@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -146,5 +147,39 @@ func TestTokens(t *testing.T) {
 	}
 	if _, ok := s.VerifyToken(ctx, plain); ok {
 		t.Fatal("deleted token verified")
+	}
+}
+
+func TestTargetSBOMs(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	m := IngestMeta{Host: "vm-1", Kind: "vm", Target: "/", RunID: "r1"}
+	res, err := s.IngestReport(ctx, m, fixture(t, "app-dir.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.TargetSBOM(ctx, res.TargetID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("no sbom yet: err = %v", err)
+	}
+	for _, sha := range []string{"aaa", "bbb"} { // the second upload replaces the first
+		if err := s.SetTargetSBOM(ctx, res.TargetID, sha, 10, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sha, got, err := s.TargetSBOM(ctx, res.TargetID)
+	if err != nil || sha != "bbb" || got != m {
+		t.Fatalf("TargetSBOM = %q %+v %v", sha, got, err)
+	}
+	if refs, _ := s.SBOMRefs(ctx); len(refs) != 1 || !refs["bbb"] {
+		t.Fatalf("refs = %v", refs)
+	}
+	if ids, _ := s.LiveSBOMTargets(ctx); len(ids) != 1 || ids[0] != res.TargetID {
+		t.Fatalf("live = %v", ids)
+	}
+	if _, err := s.CompleteRun(ctx, m, "ok", []string{}); err != nil { // retires the target
+		t.Fatal(err)
+	}
+	if ids, _ := s.LiveSBOMTargets(ctx); len(ids) != 0 {
+		t.Fatalf("retired target still live: %v", ids)
 	}
 }

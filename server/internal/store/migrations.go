@@ -159,4 +159,15 @@ JOIN hosts h ON h.id = t.host_id
 LEFT JOIN triage th ON th.vuln_id = f.vuln_id AND th.host_id = h.id
 LEFT JOIN triage tg ON tg.vuln_id = f.vuln_id AND tg.host_id = 0;
 `,
+	// 2: the latest SBOM of each target, so a new vulnerability DB can be
+	// matched against every host without waiting for its agent.
+	`
+CREATE TABLE target_sboms (
+  target_id   INTEGER PRIMARY KEY REFERENCES targets(id) ON DELETE CASCADE,
+  sha256      TEXT NOT NULL,                     -- file in <data>/sboms
+  size_bytes  INTEGER NOT NULL,
+  meta        TEXT NOT NULL,                     -- IngestMeta JSON to re-ingest with
+  received_at TEXT NOT NULL
+);
+`,
 }
