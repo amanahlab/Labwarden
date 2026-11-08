@@ -120,7 +120,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "database unavailable")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": s.cfg.Version})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) agentFile(name string) http.HandlerFunc {

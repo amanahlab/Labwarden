@@ -233,6 +233,23 @@ func TestPublicEndpoints(t *testing.T) {
 	}
 }
 
+// Before login the server does not say which version it runs.
+func TestVersionOnlyAfterLogin(t *testing.T) {
+	ts, _ := newTestServer(t)
+	for _, p := range []string{"/healthz", "/api/v1/auth/me"} {
+		var out map[string]any
+		getJSON(t, http.DefaultClient, ts.URL+p, &out)
+		if _, ok := out["version"]; ok {
+			t.Errorf("GET %s without a session reveals the version", p)
+		}
+	}
+	var me map[string]any
+	getJSON(t, login(t, ts, testPassword), ts.URL+"/api/v1/auth/me", &me)
+	if me["version"] != "test" {
+		t.Errorf("/auth/me after login: version %v, want test", me["version"])
+	}
+}
+
 func TestExportNeutralizesFormulas(t *testing.T) {
 	ts, _ := newTestServer(t)
 	if got := uploadTo(t, ts, testToken, "h1", "=HYPERLINK(1)", fixture(t), false).StatusCode; got != http.StatusCreated {

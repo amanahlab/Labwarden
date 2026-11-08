@@ -229,7 +229,7 @@ export interface SystemInfo {
 export interface Me {
   authenticated: boolean
   auth_enabled: boolean
-  version: string
+  version?: string // only when authenticated
 }
 
 export class ApiError extends Error {

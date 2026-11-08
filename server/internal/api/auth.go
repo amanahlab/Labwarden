@@ -169,12 +169,15 @@ func (s *Server) logoutAll(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int64{"ended": n})
 }
 
+// me tells the UI whether to show the login page. The version, which would
+// help an attacker pick exploits, is only for signed-in users.
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": !s.authEnabled() || s.validSession(r),
-		"auth_enabled":  s.authEnabled(),
-		"version":       s.cfg.Version,
-	})
+	authed := !s.authEnabled() || s.validSession(r)
+	out := map[string]any{"authenticated": authed, "auth_enabled": s.authEnabled()}
+	if authed {
+		out["version"] = s.cfg.Version
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) event(r *http.Request, level, source, host, runID, msg string) {
