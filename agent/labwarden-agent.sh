@@ -153,6 +153,9 @@ enroll() {
 		log error "LABWARDEN_TOKEN is not a valid enrollment token"
 		return 1
 	fi
+	# The dashboard hands out a credential only once: make sure it can be kept.
+	mkdir -p "$LABWARDEN_STATE" && chmod 700 "$LABWARDEN_STATE" && (umask 077 && : >"$CRED_FILE.tmp") ||
+		{ log error "cannot write the credential to $LABWARDEN_STATE; not enrolling" && return 1; }
 	printf '{"host":%s}' "$(json_str "$LABWARDEN_HOST")" >"$WORK/enroll.json"
 	: >"$WORK/enrolled.json"
 	_code=$(dashboard_curl -sS --max-time 60 -H "@$WORK/enroll.hdr" -H "Content-Type: application/json" \
@@ -173,10 +176,15 @@ enroll() {
 	log info "enrolled $LABWARDEN_HOST with the dashboard"
 }
 
+os_release() { # os_release <key>: its value in /etc/os-release, unquoted
+	sed -n "s/^$1=//p" /etc/os-release | head -n1 | sed 's/^["'"'"']//; s/["'"'"']$//'
+}
+
 host_os() {
 	# Read, never sourced: os-release is data, not a script.
 	if [ -r /etc/os-release ]; then
-		sed -n 's/^PRETTY_NAME=//p' /etc/os-release | head -n1 | sed 's/^["'"'"']//; s/["'"'"']$//'
+		_os=$(os_release PRETTY_NAME)
+		printf '%s' "${_os:-$(os_release NAME)}"
 	else
 		uname -s
 	fi
@@ -259,6 +267,9 @@ export_container() { # export_container <container-id> <dir>: unpack its filesys
 	else
 		docker export "$1" </dev/null | tar -xof - -C "$2" 2>/dev/null
 	fi
+	# Busybox tar keeps setuid bits even with --no-same-permissions; nobody
+	# needs them in a tree that is only cataloged.
+	find "$2" -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} + 2>/dev/null
 	[ -d "$2/etc" ] || [ -d "$2/usr" ]
 }
 
@@ -302,13 +313,14 @@ query_for() { # query_for <target-name> <duration-ms>
 }
 
 # upload <gz-file> <query>: the server answers 202 and matches it in
-# the background. Returns 2 when the server rejects the content itself (bad or
-# too large), which no retry can fix; 1 for anything worth retrying later.
+# the background. Returns 2 when the server rejects the upload itself (bad, too
+# large, or for another host), which no retry can fix; 1 for anything worth
+# retrying later.
 upload() {
 	: >"$WORK/resp.json" # curl -f writes no body on an error; never report the last success
 	_code=$(api "/api/v1/ingest/sbom?$2" application/json "$1" -H "Content-Encoding: gzip" \
 		-o "$WORK/resp.json" -w '%{http_code}') && return 0
-	case "$_code" in 400 | 413 | 415 | 422) return 2 ;; esac
+	case "$_code" in 400 | 403 | 413 | 415 | 422) return 2 ;; esac
 	return 1
 }
 
@@ -386,7 +398,9 @@ main() {
 		# A run killed without its trap (SIGKILL, power loss, a stopped
 		# container) leaves the lock behind; take it over if its owner is gone.
 		_pid=$(cat "$LOCK/pid" 2>/dev/null)
-		if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null &&
+		# Our own pid in there is a leftover too: a restarted container
+		# often gets the same pid as the run that was killed.
+		if [ -n "$_pid" ] && [ "$_pid" != "$$" ] && kill -0 "$_pid" 2>/dev/null &&
 			{ [ ! -r "/proc/$_pid/cmdline" ] || grep -q labwarden-agent "/proc/$_pid/cmdline"; }; then
 			log warn "another labwarden-agent run is in progress; exiting"
 			exit 0

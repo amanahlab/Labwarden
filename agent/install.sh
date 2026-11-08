@@ -73,11 +73,16 @@ validate() {
 
 # fetch <url> <file>: from the dashboard, never following a redirect elsewhere.
 fetch() {
-	if [ -n "${LABWARDEN_CA_FILE:-}" ]; then
-		curl -fsS --proto =http,https --cacert "$LABWARDEN_CA_FILE" --max-time 120 -o "$2" "$1"
-	else
-		curl -fsS --proto =http,https --max-time 120 -o "$2" "$1"
-	fi
+	_url=$1 _out=$2
+	set -- # extra curl options
+	[ -z "${LABWARDEN_CA_FILE:-}" ] || set -- --cacert "$LABWARDEN_CA_FILE"
+	_code=$(curl -sS --proto =http,https --max-time 120 "$@" -o "$_out" -w '%{http_code}' "$_url") || return 1
+	case "$_code" in
+	2??) return 0 ;;
+	3??) printf 'labwarden: error: %s redirects (HTTP %s); set LABWARDEN_URL to the address it redirects to\n' "$_url" "$_code" >&2 ;;
+	*) printf 'labwarden: error: %s answered HTTP %s\n' "$_url" "$_code" >&2 ;;
+	esac
+	return 1
 }
 
 # verify <file> <sha256>
@@ -203,7 +208,7 @@ ProtectHostname=yes
 RestrictSUIDSGID=yes
 RestrictNamespaces=yes
 RestrictRealtime=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native

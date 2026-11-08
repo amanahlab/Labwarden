@@ -71,4 +71,23 @@ check "auth_header refuses a newline" 1 auth_header "vxa_ok${nl}X-Evil: 1" "$tmp
 check "auth_header refuses an empty secret" 1 auth_header "" "$tmp/h3"
 rm -rf "$tmp"
 
+# host_os reads /etc/os-release of this throwaway container.
+eval "$(sed -n '/^os_release()/,/^}/p; /^host_os()/,/^}/p' agent/labwarden-agent.sh)"
+cp /etc/os-release /tmp/os-release.orig
+printf 'NAME="Plain OS"\nPRETTY_NAME="Plain OS 1 (x)"\n' >/etc/os-release
+check "host_os reads PRETTY_NAME" 0 test "$(host_os)" = "Plain OS 1 (x)"
+printf "NAME='Plain OS'\nID=plain\n" >/etc/os-release
+check "host_os falls back to NAME" 0 test "$(host_os)" = "Plain OS"
+printf 'PRETTY_NAME="$(id)"\n' >/etc/os-release
+check "host_os never runs os-release" 0 test "$(host_os)" = '$(id)'
+cp /tmp/os-release.orig /etc/os-release
+
+# A restarted container often hands the new run the pid of the run that was
+# killed holding the lock; exec keeps $$, so the lock names the agent itself.
+check "a lock holding the agent's own pid is stale" 0 sh -c '
+	mkdir -p /tmp/lws/agent.lock && rm -f /tmp/lws/out
+	sh -c "echo \$\$ >/tmp/lws/agent.lock/pid && LABWARDEN_STATE=/tmp/lws LABWARDEN_URL=http://127.0.0.1:9 \
+		LABWARDEN_TOKEN=vxe_0123456789abcdef0123 ENV_FILE=/nonexistent exec sh agent/labwarden-agent.sh" >/tmp/lws/out 2>&1
+	grep -q "removing stale lock" /tmp/lws/out'
+
 [ "$fails" -eq 0 ] || { echo "$fails check(s) failed" && exit 1; }
