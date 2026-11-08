@@ -240,3 +240,24 @@ func TestCSVRow(t *testing.T) {
 		}
 	}
 }
+
+func TestMissingAssetIs404(t *testing.T) {
+	ts, _ := newTestServer(t)
+	res, err := http.Get(ts.URL + "/assets/Overview-old.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusNotFound || strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("missing asset: %d %s", res.StatusCode, res.Header.Get("Content-Type"))
+	}
+	// Client routes still get the SPA.
+	res, err = http.Get(ts.URL + "/hosts/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK || !strings.HasPrefix(res.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("client route: %d %s", res.StatusCode, res.Header.Get("Content-Type"))
+	}
+}

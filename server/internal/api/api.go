@@ -142,6 +142,12 @@ func (s *Server) spa(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		// A missing hashed asset (e.g. an old chunk after a redeploy) must 404,
+		// not get index.html: the UI detects the failed import and reloads.
+		if strings.HasPrefix(p, "assets/") {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	index, err := fs.ReadFile(s.webFS, "index.html")
 	if err != nil {

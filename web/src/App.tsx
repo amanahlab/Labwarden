@@ -5,6 +5,7 @@ import { Center, Spinner } from "@chakra-ui/react"
 import { api, setUnauthorizedHandler, type Me } from "@/lib/api"
 import { Layout } from "@/components/Layout"
 import { LoginPage } from "@/pages/Login"
+import { RouteError } from "@/components/RouteError"
 
 const Loading = () => (
   <Center h="100vh">
@@ -19,6 +20,10 @@ const router = createBrowserRouter([
     element: <Layout />,
     HydrateFallback: Loading,
     children: [
+      {
+        // Pathless wrapper: page errors render inside the layout.
+        errorElement: <RouteError />,
+        children: [
       { index: true, lazy: async () => ({ Component: (await import("@/pages/Overview")).OverviewPage }) },
       { path: "vulnerabilities", lazy: async () => ({ Component: (await import("@/pages/Vulnerabilities")).VulnerabilitiesPage }) },
       { path: "vulnerabilities/:id", lazy: async () => ({ Component: (await import("@/pages/VulnDetail")).VulnDetailPage }) },
@@ -28,6 +33,8 @@ const router = createBrowserRouter([
       { path: "logs", lazy: async () => ({ Component: (await import("@/pages/Logs")).LogsPage }) },
       { path: "settings", lazy: async () => ({ Component: (await import("@/pages/Settings")).SettingsPage }) },
       { path: "*", lazy: async () => ({ Component: (await import("@/pages/NotFound")).NotFoundPage }) },
+        ],
+      },
     ],
   },
 ])
