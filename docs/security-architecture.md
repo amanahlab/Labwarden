@@ -28,7 +28,7 @@ There are three kinds of secret, each with a narrow job:
 
 ## Signing in to the dashboard
 
-**A password is required.** The server refuses to start without an admin password of at least 12 characters, and the placeholder `change-me` is rejected. Run `scripts/dev-env.sh` to generate a strong one. If you really want an open dashboard on a network you fully trust, you have to say so with `LABWARDEN_AUTH_DISABLED=true`, and the server repeats a warning about it every hour.
+**A password is required.** The admin password must have at least 12 characters, and the placeholder `change-me` is rejected. If you don't set `LABWARDEN_ADMIN_PASSWORD`, the server generates a random one on first start. It stores it in the data volume as `admin-password`, readable only by the server (mode 0600), and never writes it to the log. Unlike a password in `.env`, it does not appear in `docker inspect`. Show it with `docker compose exec labwarden cat /data/admin-password`. If you set your own password, the server deletes the generated file. If you really want an open dashboard on a network you fully trust, you have to say so with `LABWARDEN_AUTH_DISABLED=true`, and the server repeats a warning about it every hour.
 
 **Guessing is slowed down.** After 5 wrong passwords from one address, that address is locked out, and the lockout grows by 30 seconds with each further failure. The server also counts failures across *all* addresses. If more than 30 fail within 10 minutes, addresses that have already failed are paused, and the event appears under **Logs**. You can still sign in from an address that hasn't failed. This stops an attacker from spreading guesses over many addresses.
 
@@ -140,7 +140,7 @@ The dashboard runs as an unprivileged user (uid 10001).
 
 ## Your checklist
 
-1. Set a strong `LABWARDEN_ADMIN_PASSWORD` (`scripts/dev-env.sh` makes one).
+1. Use a strong admin password: keep the generated one, or set your own `LABWARDEN_ADMIN_PASSWORD` (`scripts/dev-env.sh` makes one).
 2. Serve the dashboard over HTTPS, either directly or through a reverse proxy with `LABWARDEN_TRUSTED_PROXIES` and `LABWARDEN_PUBLIC_URL` set.
 3. Give enrollment tokens a short expiry and a host limit, and revoke them when you're done.
 4. Install agents with the download, check, run snippet from Settings.
@@ -160,6 +160,6 @@ LabWarden is built for a home lab or a small trusted network. These are known ga
 ## Upgrading from an earlier version
 
 The hardened release deliberately breaks compatibility:
-- Set an admin password, because the server no longer starts without one.
+- Make sure the dashboard has an admin password of at least 12 characters. If you don't set one, the server now generates it on first start (see above).
 - Re-run the installer on every VM and rebuild every Docker agent, so each one enrolls and gets its own credential. Your existing ingest tokens keep working as enrollment tokens.
 - Pass `LABWARDEN_CA_FILE` and `LABWARDEN_DOCKER_URL` again if you use them, because the installer rewrites `agent.env` from the settings it is given.

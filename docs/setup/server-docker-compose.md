@@ -28,7 +28,11 @@ This writes a `.env` file containing a random 24-character admin password and a 
 grep LABWARDEN_ADMIN_PASSWORD .env
 ```
 
-Prefer to write it yourself? Copy `.env.example` to `.env`, run `chmod 600 .env`, and set `LABWARDEN_ADMIN_PASSWORD` to at least 12 characters. The server will not start without it.
+Prefer to write it yourself? Copy `.env.example` to `.env`, run `chmod 600 .env`, and set `LABWARDEN_INGEST_TOKEN` to at least 16 characters: `docker-compose.yml` refuses to start without it. `LABWARDEN_ADMIN_PASSWORD` is optional. If you set it, use at least 12 characters. If you leave it out, the server generates one on first start and stores it in the data volume. To see it:
+
+```bash
+docker compose exec labwarden cat /data/admin-password
+```
 
 ## 3. Start the dashboard
 
@@ -37,7 +41,7 @@ docker compose up -d --build
 docker compose ps        # wait until the labwarden service shows "healthy"
 ```
 
-Open `http://<host>:8080` and sign in with the password from `.env`. On first start the server downloads the vulnerability database, which takes a few minutes. **Settings → System** shows its progress.
+Open `http://<host>:8080` and sign in with the password from `.env`, or the generated one. On first start the server downloads the vulnerability database, which takes a few minutes. **Settings → System** shows its progress.
 
 > Only start the `labwarden` service. The `testbed` services in the same file are deliberately vulnerable test machines for development. Never start them with `--profile testbed` on a real setup.
 
@@ -47,7 +51,7 @@ All settings go in `.env`. Apply changes with `docker compose up -d`.
 
 | Setting | What it does |
 |---|---|
-| `LABWARDEN_ADMIN_PASSWORD` | Admin password, at least 12 characters. Changing it signs out every session. |
+| `LABWARDEN_ADMIN_PASSWORD` | Admin password, at least 12 characters. If unset, the server generates one in `/data/admin-password`. Setting it deletes that file. Changing it signs out every session. |
 | `LABWARDEN_PORT` | Where the dashboard is published on the host. `8080` listens on every interface. `127.0.0.1:8080` limits it to the host itself, which is what you want behind a reverse proxy. |
 | `LABWARDEN_PUBLIC_URL` | The address you use to open the dashboard, such as `https://labwarden.example.lan`. Used for links in alerts and for the cross-site request check behind a proxy. |
 | `LABWARDEN_TRUSTED_PROXIES` | The address of your reverse proxy, so login protection sees real client addresses. See the [Caddy](reverse-proxy-caddy.md) and [nginx](reverse-proxy-nginx.md) guides. |
@@ -103,25 +107,27 @@ Read the release notes or the README's upgrade notes first. Some releases requir
 
 ## Backups
 
-All state lives in one Docker volume, `labwarden_labwarden-data`: the database, the job queue, the stored package lists (SBOMs) and the session key. Stop the dashboard briefly so the database is consistent, then archive the volume. The vulnerability database and temporary files are skipped, because the server downloads them again.
+All state lives in one Docker volume, `labwarden_labwarden-data`: the database, the job queue, the stored package lists (SBOMs), the session key and a generated admin password. Stop the dashboard briefly so the database is consistent, then archive the volume. The vulnerability database and temporary files are skipped, because the server downloads them again. The generated admin password is skipped too, so the archive holds no plaintext password.
 
 ```bash
 mkdir -p backups && chmod 700 backups
 docker compose stop labwarden
 docker run --rm -v labwarden_labwarden-data:/data:ro -v "$PWD/backups:/backup" \
   alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f \
-  tar czf "/backup/labwarden-$(date +%F).tar.gz" -C /data --exclude ./grype-db --exclude ./tmp .
+  tar czf "/backup/labwarden-$(date +%F).tar.gz" -C /data --exclude ./grype-db --exclude ./tmp --exclude ./admin-password .
 docker compose start labwarden
 ```
 
 Treat backups as sensitive. They hold your inventory of hosts and vulnerabilities, and the key that protects admin sessions. Tokens and credentials inside are stored only as hashes.
+
+After a restore without `LABWARDEN_ADMIN_PASSWORD` set, the server generates a new admin password. Read it again with `docker compose exec labwarden cat /data/admin-password`. The new password ends all sessions.
 
 Never run `docker compose down -v`: the `-v` deletes the data volume.
 
 ## Secure setup checklist
 
 - **Keep `.env` private.** It should be readable by you only (`chmod 600 .env`). Never commit it or paste it anywhere.
-- **Use a long random admin password.** `scripts/dev-env.sh` makes one. Don't use `LABWARDEN_AUTH_DISABLED=true` outside a throwaway lab.
+- **Use a long random admin password.** The server generates one if you don't set your own, and `scripts/dev-env.sh` makes one too. Don't use `LABWARDEN_AUTH_DISABLED=true` outside a throwaway lab.
 - **Don't publish the dashboard to the whole network** unless clients need to reach it directly. Behind a reverse proxy, set `LABWARDEN_PORT=127.0.0.1:8080` so only the proxy can reach it.
 - **Use HTTPS**: the dashboard's own TLS, [Caddy](reverse-proxy-caddy.md) or [nginx](reverse-proxy-nginx.md). Without it, passwords, tokens and credentials cross the network in clear text.
 - **Don't expose LabWarden to the internet.** It is built for a home lab or small trusted network. For remote access, use a VPN such as WireGuard or Tailscale.

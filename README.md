@@ -112,10 +112,10 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 
 | Variable | Default | |
 |---|---|---|
-| `LABWARDEN_ADMIN_PASSWORD` | *(required)* | Password for the web UI, at least 12 characters. The server will not start without it. Sessions end after 24 hours unused or 7 days in any case; changing the password, or **Settings → Sign out all sessions**, ends them all |
+| `LABWARDEN_ADMIN_PASSWORD` | *(generated)* | Password for the web UI, at least 12 characters. If unset, the server generates one on first start and keeps it in `$LABWARDEN_DATA/admin-password` (mode 0600, never logged); setting it deletes that file. Sessions end after 24 hours unused or 7 days in any case; changing the password, or **Settings → Sign out all sessions**, ends them all |
 | `LABWARDEN_AUTH_DISABLED` | `false` | `true` runs the web UI without a password (only on a network you trust; logged every hour). Cannot be combined with a password |
 | `LABWARDEN_INGEST_TOKEN` | | Optional bootstrap enrollment token (at least 16 characters, never expires). Imported once; revoking it in Settings sticks across restarts |
-| `LABWARDEN_DATA` | `/data` | SQLite database, job queue (`queue.db`), stored SBOMs, session key, Grype DB |
+| `LABWARDEN_DATA` | `/data` | SQLite database, job queue (`queue.db`), stored SBOMs, session key, generated admin password, Grype DB |
 | `LABWARDEN_ADDR` | `:8080` | |
 | `LABWARDEN_TLS_CERT`, `LABWARDEN_TLS_KEY` | | PEM certificate (with its chain) and key: serve HTTPS directly, TLS 1.2 or newer. A renewed pair is picked up within a minute, or at once on `SIGHUP`. Set both or neither |
 | `LABWARDEN_COOKIE_SECURE` | `false` | `true` marks the session cookie `Secure` (with the `__Host-` prefix). Automatic when the request arrives over TLS, when a trusted proxy sends `X-Forwarded-Proto: https`, or when it is for the host of an `https://` `LABWARDEN_PUBLIC_URL` |
@@ -155,7 +155,9 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md). For a plain-l
 
 **Supply chain.** The images LabWarden ships and runs (the dashboard and agent images, their base and tool images, and the socket proxy) are pinned by tag and digest; the build-and-test containers in `scripts/` are pinned by tag. `scripts/test.sh` runs `govulncheck` and `npm audit` for production dependencies.
 
-**Upgrading to the hardened release** breaks compatibility: set an admin password of at least 12 characters (the server no longer starts without one), then re-install every agent (see Installing agents).
+**Upgrading to the hardened release** breaks compatibility: the admin password needs at least 12 characters, and every agent must be re-installed (see Installing agents).
+
+**Generated admin password.** The server no longer refuses to start without `LABWARDEN_ADMIN_PASSWORD`: it generates one on first start and stores it in the data volume. Show it with `docker compose exec labwarden cat /data/admin-password`. A password you set keeps working, and setting one deletes the generated file.
 
 ## Development
 
