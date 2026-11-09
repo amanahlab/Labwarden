@@ -39,7 +39,7 @@ const plainHTTP = window.location.protocol === "http:" && !["localhost", "127.0.
 // A release build embeds the agent image published with it (release.yml passes
 // AGENT_IMAGE to the Dockerfile). Other builds use this pin of the latest
 // release: tag + multi-arch index digest (docker buildx imagetools inspect).
-const agentImage = import.meta.env.VITE_AGENT_IMAGE || "ghcr.io/amanahlab/labwarden-agent:0.1.0@sha256:3eb0eb6aadb06e85b6b40b8edd42dc665f9ec508cc68be09fed1229c9ba22726"
+const agentImage = import.meta.env.VITE_AGENT_IMAGE || "ghcr.io/amanahlab/labwarden-agent:0.1.1@sha256:c7b39b8834511148599db45d737627d6bcb13d32494472176ea8628780dfd767"
 
 export function SettingsPage() {
   return (
