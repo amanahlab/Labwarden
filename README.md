@@ -178,7 +178,7 @@ The proving ground runs a deliberately vulnerable "VM" (Debian 12 with log4j 2.1
 
 ### Releasing
 
-Push a version tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The release workflow (`.github/workflows/release.yml`) runs `scripts/test.sh`, then publishes `ghcr.io/amanahlab/labwarden` and `ghcr.io/amanahlab/labwarden-agent` for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z`, `X.Y` and `latest`, with SBOM and provenance attestations. Then open a follow-up PR that pins the new tag and its multi-arch index digest (`docker buildx imagetools inspect ghcr.io/amanahlab/<image>:X.Y.Z`) everywhere the old one appears (`git grep -n 'ghcr.io/amanahlab/labwarden'`): the dashboard image in `docker-compose.yml`, the agent image in the Settings snippets (`web/src/pages/Settings.tsx`), `docs/setup/agent-docker.md` and this README.
+Push a version tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The release workflow (`.github/workflows/release.yml`) runs `scripts/test.sh`, then publishes `ghcr.io/amanahlab/labwarden` and `ghcr.io/amanahlab/labwarden-agent` for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z`, `X.Y` and `latest`, with SBOM and provenance attestations. The agent is published first, and the dashboard's Settings snippets embed that agent's tag and index digest, so each release shows its own agent. Then open a follow-up PR that pins the new tag and its multi-arch index digest (`docker buildx imagetools inspect ghcr.io/amanahlab/<image>:X.Y.Z`) everywhere the old one appears (`git grep -n 'ghcr.io/amanahlab/labwarden'`): the dashboard image in `docker-compose.yml`, the agent image in the Settings fallback for non-release builds (`web/src/pages/Settings.tsx`), `docs/setup/agent-docker.md` and this README.
 
 ## License
 
