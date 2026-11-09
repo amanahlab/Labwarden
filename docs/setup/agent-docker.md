@@ -47,10 +47,9 @@ services:
     # No "ports:" here: only the agent, on this Compose network, can reach the proxy.
 
   labwarden-agent:
-    # Built from the LabWarden repository. For repeatable builds, replace
-    # "main" with a release tag or commit.
-    build: https://github.com/amanahlab/Labwarden.git#main:agent
-    image: labwarden-agent:local
+    # Release tag + multi-arch index digest. The Settings snippet always has
+    # the one that matches your dashboard.
+    image: ghcr.io/amanahlab/labwarden-agent:0.1.0@sha256:3eb0eb6aadb06e85b6b40b8edd42dc665f9ec508cc68be09fed1229c9ba22726
     restart: unless-stopped
     depends_on: [docker-proxy]
     read_only: true
@@ -77,7 +76,7 @@ Set `LABWARDEN_URL` to your dashboard's address and `LABWARDEN_HOST` to the name
 ## 3. Start it
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 docker compose logs -f labwarden-agent
 ```
 
@@ -120,12 +119,12 @@ Put the CA certificate next to `compose.yaml` as `ca.pem`, then add to the `labw
 
 ## Updating
 
+Set `image:` to the line from **Settings → Connect a host → Docker Compose** after you update the dashboard, then:
+
 ```bash
-docker compose build --pull
+docker compose pull
 docker compose up -d
 ```
-
-If you pinned a release tag or commit in `build:`, change it first.
 
 ## Without Compose
 
@@ -137,7 +136,7 @@ If you pinned a release tag or commit in `build:`, change it first.
 - **Use HTTPS** for `LABWARDEN_URL`. The agent doesn't follow redirects, so use the `https://` address directly.
 - **Keep the token out of `compose.yaml`.** Put it in a `.env` readable only by you, and remove it after the first run.
 - **Keep the hardening:** `read_only`, `cap_drop: [ALL]` with only `DAC_OVERRIDE` added back, and `no-new-privileges`.
-- **Pin what you run.** Keep the socket proxy pinned by digest, and build the agent from a release tag or commit rather than `main`.
+- **Pin what you run.** Keep the socket proxy and the agent pinned by tag and digest, as in the file above. Never use `latest`.
 - **One name per host.** Each host name can hold one credential. Don't run a Linux agent and a Docker agent under the same name.
 - **Don't skip certificate checks.** Give the agent your CA with `LABWARDEN_CA_FILE` instead of falling back to http.
 - **Act when a host is compromised or retired:** delete it in the dashboard or click **Reset credential**, and revoke the token that enrolled it.

@@ -36,6 +36,9 @@ const onError = (title: string) => (e: unknown) => toaster.create({ type: "error
 // host credentials cross the network readable by anyone on the path.
 const plainHTTP = window.location.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)
 
+// Release tag + multi-arch index digest (docker buildx imagetools inspect).
+const agentImage = "ghcr.io/amanahlab/labwarden-agent:0.1.0@sha256:3eb0eb6aadb06e85b6b40b8edd42dc665f9ec508cc68be09fed1229c9ba22726"
+
 export function SettingsPage() {
   return (
     <>
@@ -113,7 +116,7 @@ sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh lw-
   -v labwarden-agent-db:/var/lib/labwarden \\
   -e LABWARDEN_URL=${url} -e LABWARDEN_TOKEN=<token> \\
   -e LABWARDEN_HOST=$(hostname) -e LABWARDEN_GROUP=homelab \\
-  labwarden-agent:latest`
+  ${agentImage}`
   const compose = `services:
   # Read-only Docker API: the agent never holds the socket itself.
   docker-proxy:
@@ -123,7 +126,7 @@ sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh lw-
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
   labwarden-agent:
-    image: labwarden-agent:latest   # built from agent/Dockerfile in the LabWarden repo
+    image: ${agentImage}
     restart: unless-stopped
     depends_on: [docker-proxy]
     read_only: true
@@ -179,8 +182,7 @@ volumes:
           <Stack gap="3">
             <Text textStyle="sm" color="fg.muted">
               Scans the image of every running container through the Docker socket. The socket is root-equivalent even when mounted{" "}
-              <Code size="sm">:ro</Code>; the Compose tab puts a read-only socket proxy in between. Build the image once from the repository with{" "}
-              <Code size="sm">docker build -t labwarden-agent agent/</Code>.
+              <Code size="sm">:ro</Code>; the Compose tab puts a read-only socket proxy in between.
             </Text>
             <CodeBlock code={docker} />
             <Text textStyle="xs" color="fg.muted">
