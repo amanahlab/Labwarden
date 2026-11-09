@@ -256,6 +256,10 @@ curl -fsS -o /dev/null -b "$JAR2" -X POST "$URL/api/v1/auth/logout" || fail "log
 code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$JAR2" "$URL/api/v1/summary")
 [ "$code" = 401 ] || fail "session cookie replayed after logout: status $code, want 401"
 pass "logout ends the session on the server"
+# The password comes from .env, so no generated one may sit in the volume.
+docker compose exec -T labwarden test ! -e /data/admin-password ||
+  fail "a generated admin password file exists although LABWARDEN_ADMIN_PASSWORD is set"
+pass "no generated admin password file when the password is set"
 # Last: this locks the e2e client out of logging in for a while.
 i=0 code=
 while [ $i -lt 10 ]; do
