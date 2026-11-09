@@ -125,7 +125,7 @@ Access to the Docker socket is effectively root on that host, even when it is mo
 
 ## The containers themselves
 
-The shipped `docker-compose.yml` runs both the dashboard and the Docker agent:
+The shipped `docker-compose.yml` runs the dashboard this way. The Docker agent runs the same way, both in the Compose snippet from Settings and as the testbed agent in `docker-compose.dev.yml`, which the automated tests check:
 - with a **read-only root filesystem** (only the data volume and a small `/tmp` are writable)
 - with **no Linux capabilities**. The agent keeps one, `DAC_OVERRIDE`, so it can unpack container filesystems.
 - with **no-new-privileges**, so nothing inside can gain privileges
@@ -134,13 +134,13 @@ The dashboard runs as an unprivileged user (uid 10001).
 
 ## Keeping dependencies honest
 
-- **Pinned images.** Every image LabWarden ships or runs (its own images, their base and tool images, and the socket proxy) is pinned by tag *and* by digest, so a tag that is later changed upstream cannot sneak in different code.
+- **Pinned images.** The dashboard image comes from GitHub's container registry (`ghcr.io/amanahlab/labwarden`), and `docker-compose.yml` pins it by tag *and* by digest. Every other image LabWarden ships or runs (the agent image, base and tool images, and the socket proxy) is pinned the same way, so a tag that is later changed upstream cannot sneak in different code.
 - **Pinned tools.** Grype and Syft versions are pinned and updated together on purpose, along with Syft's checksums in the installer.
 - **Automatic checks.** Every test run, including CI, checks the Go code with `govulncheck` and the web dependencies with `npm audit`.
 
 ## Your checklist
 
-1. Use a strong admin password: keep the generated one, or set your own `LABWARDEN_ADMIN_PASSWORD` (`scripts/dev-env.sh` makes one).
+1. Use a strong admin password: keep the generated one, or set your own long random `LABWARDEN_ADMIN_PASSWORD`.
 2. Serve the dashboard over HTTPS, either directly or through a reverse proxy with `LABWARDEN_TRUSTED_PROXIES` and `LABWARDEN_PUBLIC_URL` set.
 3. Give enrollment tokens a short expiry and a host limit, and revoke them when you're done.
 4. Install agents with the download, check, run snippet from Settings.

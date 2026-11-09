@@ -1,49 +1,46 @@
 # Dashboard with Docker Compose
 
-This guide runs the LabWarden server, which holds the dashboard, the vulnerability database and all results, with Docker Compose on a Linux host.
+This guide runs the LabWarden server, which holds the dashboard, the vulnerability database and all results, with Docker Compose on a Linux host. You need one file, `docker-compose.yml`, and nothing to build.
 
 ## What you need
 
 - A Linux host with **Docker Engine** and **Docker Compose v2.24 or newer** (`docker compose version`).
 - At least **2 GB of RAM** and **10 GB of free disk**. The vulnerability database is several GB, and each matching worker uses about 115 MB.
-- `git`, to fetch LabWarden. There are no prebuilt images yet: Compose builds the image on your host.
-- Internet access from the host. The server downloads a fresh vulnerability database every night.
+- Internet access from the host. Compose pulls the LabWarden image from GitHub's container registry, and the server downloads a fresh vulnerability database every night.
 
-## 1. Get LabWarden
-
-```bash
-git clone https://github.com/amanahlab/Labwarden.git labwarden
-cd labwarden
-```
-
-## 2. Create your settings file
+## 1. Download the Compose file
 
 ```bash
-scripts/dev-env.sh
+mkdir labwarden && cd labwarden
+curl -fsSLO https://raw.githubusercontent.com/amanahlab/Labwarden/main/docker-compose.yml
 ```
 
-This writes a `.env` file containing a random 24-character admin password and a bootstrap enrollment token. The file is readable only by you, and the script never prints the secrets. To see the password:
+## 2. Start the dashboard
 
 ```bash
-grep LABWARDEN_ADMIN_PASSWORD .env
+docker compose up -d
+docker compose ps        # wait until the labwarden service shows "healthy"
 ```
 
-Prefer to write it yourself? Copy `.env.example` to `.env`, run `chmod 600 .env`, and set `LABWARDEN_INGEST_TOKEN` to at least 16 characters: `docker-compose.yml` refuses to start without it. `LABWARDEN_ADMIN_PASSWORD` is optional. If you set it, use at least 12 characters. If you leave it out, the server generates one on first start and stores it in the data volume. To see it:
+## 3. Sign in
+
+On first start the server generates a random admin password. It stores it in the data volume, readable only by the server, and never writes it to the log. To see it:
 
 ```bash
 docker compose exec labwarden cat /data/admin-password
 ```
 
-## 3. Start the dashboard
+Open `http://<host>:8080` and sign in with it. On first start the server also downloads the vulnerability database, which takes a few minutes. **Settings → System** shows its progress.
+
+## Your settings file
+
+Settings are optional. They go in a `.env` file next to `docker-compose.yml`; without one, the defaults apply. [`.env.example`](https://github.com/amanahlab/Labwarden/blob/main/.env.example) lists them. Create the file readable only by you:
 
 ```bash
-docker compose up -d --build
-docker compose ps        # wait until the labwarden service shows "healthy"
+touch .env && chmod 600 .env
 ```
 
-Open `http://<host>:8080` and sign in with the password from `.env`, or the generated one. On first start the server downloads the vulnerability database, which takes a few minutes. **Settings → System** shows its progress.
-
-> Only start the `labwarden` service. The `testbed` services in the same file are deliberately vulnerable test machines for development. Never start them with `--profile testbed` on a real setup.
+To set your own admin password instead of the generated one, add `LABWARDEN_ADMIN_PASSWORD` with at least 12 characters. The server then deletes the generated file.
 
 ## Settings you are most likely to change
 
@@ -56,7 +53,7 @@ All settings go in `.env`. Apply changes with `docker compose up -d`.
 | `LABWARDEN_PUBLIC_URL` | The address you use to open the dashboard, such as `https://labwarden.example.lan`. Used for links in alerts and for the cross-site request check behind a proxy. |
 | `LABWARDEN_TRUSTED_PROXIES` | The address of your reverse proxy, so login protection sees real client addresses. See the [Caddy](reverse-proxy-caddy.md) and [nginx](reverse-proxy-nginx.md) guides. |
 | `LABWARDEN_TLS_CERT`, `LABWARDEN_TLS_KEY` | Let the dashboard serve HTTPS itself (see below). |
-| `LABWARDEN_INGEST_TOKEN` | Bootstrap enrollment token that never expires. Optional: you can delete the line and create tokens in Settings instead. |
+| `LABWARDEN_INGEST_TOKEN` | Optional bootstrap enrollment token that never expires. Short-lived tokens created in Settings are safer. |
 | `LABWARDEN_NOTIFY_URL` | Webhook for alerts about new critical or known-exploited findings (Slack, Discord, ntfy, …). Webhook URLs often contain a secret, so keep them only in `.env`. |
 | `LABWARDEN_DB_UPDATE_AT`, `TZ` | When the nightly vulnerability database check runs (default `03:00` UTC). |
 | `LABWARDEN_SCAN_WORKERS` | How many matching jobs run at once (default `2`). |
@@ -98,12 +95,16 @@ If the certificate comes from your own CA, agents need that CA's certificate. Se
 
 ## Updating
 
+Each release pins a new image in `docker-compose.yml`. Download the new file, then pull and restart:
+
 ```bash
-git pull
-docker compose up -d --build
+curl -fsSLO https://raw.githubusercontent.com/amanahlab/Labwarden/main/docker-compose.yml
+docker compose pull && docker compose up -d
 ```
 
 Read the release notes or the README's upgrade notes first. Some releases require agents to be re-installed.
+
+**Switching from a source build.** If you set up LabWarden from a clone of the repository, you can keep using that folder: run `git pull`, then `docker compose pull && docker compose up -d`. The dashboard keeps its data volume, `labwarden_labwarden-data`, and so its data and sessions. To move to a new folder instead, copy `.env` and any `docker-compose.override.yml` there first. Without the old `.env`, a password you set there is gone: the server generates a new one, which ends all sessions.
 
 ## Backups
 
@@ -127,7 +128,7 @@ Never run `docker compose down -v`: the `-v` deletes the data volume.
 ## Secure setup checklist
 
 - **Keep `.env` private.** It should be readable by you only (`chmod 600 .env`). Never commit it or paste it anywhere.
-- **Use a long random admin password.** The server generates one if you don't set your own, and `scripts/dev-env.sh` makes one too. Don't use `LABWARDEN_AUTH_DISABLED=true` outside a throwaway lab.
+- **Use a long random admin password.** The generated one is. If you set your own, make it just as strong. Don't use `LABWARDEN_AUTH_DISABLED=true` outside a throwaway lab.
 - **Don't publish the dashboard to the whole network** unless clients need to reach it directly. Behind a reverse proxy, set `LABWARDEN_PORT=127.0.0.1:8080` so only the proxy can reach it.
 - **Use HTTPS**: the dashboard's own TLS, [Caddy](reverse-proxy-caddy.md) or [nginx](reverse-proxy-nginx.md). Without it, passwords, tokens and credentials cross the network in clear text.
 - **Don't expose LabWarden to the internet.** It is built for a home lab or small trusted network. For remote access, use a VPN such as WireGuard or Tailscale.

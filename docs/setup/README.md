@@ -22,7 +22,7 @@ These guides walk you through a complete LabWarden setup, from the dashboard to 
 
 ## The secure setup at a glance
 
-- A strong admin password, kept in a private `.env` file.
+- A strong admin password: the generated one, or your own in a private `.env` file.
 - HTTPS for both the browser and the agents.
 - The dashboard's own port reachable only from the machine itself (or only from your proxy), not from the whole network.
 - Short-lived enrollment tokens with a host limit.
