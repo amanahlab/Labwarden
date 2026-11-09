@@ -15,5 +15,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Same entrypoint as local development: everything runs in containers.
       - run: scripts/test.sh
+      # The end-user file must work without a clone or .env: no ${X:?}, no build:.
+      - run: |
+          docker compose -f docker-compose.yml config -q
+          if grep -n 'build:' docker-compose.yml; then echo "docker-compose.yml must not build" >&2; exit 1; fi
       - run: docker build --build-arg VERSION=${GITHUB_SHA::7} -t labwarden:ci .
       - run: docker build -t labwarden-agent:ci agent/
