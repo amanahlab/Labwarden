@@ -5,7 +5,7 @@ name: labwarden
 services:
   labwarden:
     # Release tag + multi-arch index digest (docker buildx imagetools inspect).
-    image: ghcr.io/amanahlab/labwarden:0.1.1@sha256:1c65c0ad5d3c2dca333b36ef87fbde72a2619309ea9acffb142f9eee235561f8
+    image: ghcr.io/amanahlab/labwarden:0.1.2@sha256:6cdcb94538cbe7d595660e83a9b07df6cd852917c86b498a926c8373976c845e
     restart: unless-stopped
     # Writes only to /data (TMPDIR included); needs no capabilities.
     read_only: true
