@@ -88,8 +88,16 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	adminPw := os.Getenv("LABWARDEN_ADMIN_PASSWORD")
 	authOff := env("LABWARDEN_AUTH_DISABLED", "false") == "true"
+	// Never log the password itself: only where to find it.
+	adminPw, fromFile, err := resolveAdminPassword(dataDir, os.Getenv("LABWARDEN_ADMIN_PASSWORD"), authOff)
+	if err != nil {
+		return err
+	}
+	if fromFile {
+		p := filepath.Join(dataDir, adminPasswordFile)
+		log.Info("admin password is in " + p + "; show it with: docker compose exec labwarden cat " + p)
+	}
 	if err := api.CheckAuthConfig(adminPw, authOff); err != nil {
 		return err
 	}

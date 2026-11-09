@@ -18,7 +18,7 @@ func CheckAuthConfig(password string, disabled bool) error {
 	case disabled:
 		return nil
 	case password == "":
-		return errors.New("LABWARDEN_ADMIN_PASSWORD is not set: set it (scripts/dev-env.sh writes a random one to .env), " +
+		return errors.New("LABWARDEN_ADMIN_PASSWORD is not set: set it, " +
 			"or set LABWARDEN_AUTH_DISABLED=true to run the dashboard without a password")
 	case utf8.RuneCountInString(password) < minPasswordLen:
 		return fmt.Errorf("LABWARDEN_ADMIN_PASSWORD is shorter than %d characters", minPasswordLen)
