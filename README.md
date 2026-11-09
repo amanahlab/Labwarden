@@ -12,19 +12,16 @@ A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog t
 
 ## Quick start
 
-Everything runs in Docker. For a real deployment (HTTPS with Caddy or nginx, agents with and without Docker, backups), follow the step-by-step [setup guides](docs/setup/README.md).
+Everything runs in Docker (Compose v2.24 or newer). For a real deployment (HTTPS with Caddy or nginx, agents with and without Docker, backups), follow the step-by-step [setup guides](docs/setup/README.md).
 
 ```bash
-scripts/dev-env.sh                 # writes .env with a random admin password and bootstrap token
-docker compose up -d --build       # http://localhost:8080 (password: grep LABWARDEN_ADMIN_PASSWORD .env)
+mkdir labwarden && cd labwarden
+curl -fsSLO https://raw.githubusercontent.com/amanahlab/Labwarden/main/docker-compose.yml
+docker compose up -d                                     # http://localhost:8080
+docker compose exec labwarden cat /data/admin-password   # the generated admin password
 ```
 
-Start the proving ground as well. It runs a deliberately vulnerable "VM" (Debian 12 with log4j 2.14.1, old Django and lodash manifests) and a Docker agent watching an outdated Alpine container:
-
-```bash
-docker compose --profile testbed up -d --build
-scripts/e2e.sh                     # asserts the known CVEs, triage, central scans and retirement end to end
-```
+Settings are optional. They go in a `.env` file next to `docker-compose.yml`; [`.env.example`](.env.example) lists them.
 
 ## Architecture
 
@@ -151,22 +148,31 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md). For a plain-l
 - set `LABWARDEN_TLS_CERT` and `LABWARDEN_TLS_KEY`, which serve HTTPS directly and pick up renewed certificates; agents with a private CA use `LABWARDEN_CA_FILE`; or
 - put the dashboard behind an HTTPS reverse proxy, with `LABWARDEN_TRUSTED_PROXIES` set to the proxy's address (so login throttling sees real client addresses) and `LABWARDEN_PUBLIC_URL` set to the `https://` URL.
 
-**Docker.** Access to the Docker socket is root on that host, even when it is mounted `:ro`. Prefer a socket proxy that allows only `GET` on containers and images, such as `tecnativa/docker-socket-proxy` with `CONTAINERS=1 IMAGES=1 POST=0`, and point the agent at it with `LABWARDEN_DOCKER_URL` (see the Compose snippet in Settings). The shipped `docker-compose.yml` runs the dashboard and the testbed agent with a read-only root filesystem, no capabilities (the agent keeps `DAC_OVERRIDE` to unpack container filesystems) and `no-new-privileges`. The VM agent's systemd unit is sandboxed the same way.
+**Docker.** Access to the Docker socket is root on that host, even when it is mounted `:ro`. Prefer a socket proxy that allows only `GET` on containers and images, such as `tecnativa/docker-socket-proxy` with `CONTAINERS=1 IMAGES=1 POST=0`, and point the agent at it with `LABWARDEN_DOCKER_URL` (see the Compose snippet in Settings). The shipped `docker-compose.yml` runs the dashboard with a read-only root filesystem, no capabilities and `no-new-privileges`. The testbed's Docker agent in `docker-compose.dev.yml` runs the same way, except that it keeps `DAC_OVERRIDE` to unpack container filesystems. The VM agent's systemd unit is sandboxed the same way.
 
-**Supply chain.** The images LabWarden ships and runs (the dashboard and agent images, their base and tool images, and the socket proxy) are pinned by tag and digest; the build-and-test containers in `scripts/` are pinned by tag. `scripts/test.sh` runs `govulncheck` and `npm audit` for production dependencies.
+**Supply chain.** The dashboard image comes from GHCR (`ghcr.io/amanahlab/labwarden`), and `docker-compose.yml` pins it by tag and multi-arch index digest. The other images LabWarden ships and runs (the agent image, base and tool images, and the socket proxy) are pinned by tag and digest too; the build-and-test containers in `scripts/` are pinned by tag. `scripts/test.sh` runs `govulncheck` and `npm audit` for production dependencies.
 
 **Upgrading to the hardened release** breaks compatibility: the admin password needs at least 12 characters, and every agent must be re-installed (see Installing agents).
 
 **Generated admin password.** The server no longer refuses to start without `LABWARDEN_ADMIN_PASSWORD`: it generates one on first start and stores it in the data volume. Show it with `docker compose exec labwarden cat /data/admin-password`. A password you set keeps working, and setting one deletes the generated file.
 
+**Published dashboard image.** `docker-compose.yml` now runs the published image and no longer builds from source or holds the testbed. In an existing clone, `git pull`, then `docker compose pull && docker compose up -d` switches to it and keeps the data volume. To keep building from source, run `scripts/dev-env.sh` once (see Development).
+
 ## Development
 
+Development uses a clone and `docker-compose.dev.yml`, an override on top of `docker-compose.yml` that builds the dashboard from source and adds the proving ground. `scripts/dev-env.sh` writes a `.env` with random development secrets and `COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml`, so plain `docker compose` commands use both files. With `COMPOSE_FILE` set, Compose no longer loads `docker-compose.override.yml` by itself; add it to `COMPOSE_FILE` if you use one.
+
 ```bash
+scripts/dev-env.sh                               # .env with an admin password, bootstrap token and COMPOSE_FILE
+docker compose up -d --build                     # http://localhost:8080 (password: grep LABWARDEN_ADMIN_PASSWORD .env)
+docker compose --profile testbed up -d --build   # plus the proving ground
 scripts/test.sh     # go vet + go test, web lint + typecheck + build, shellcheck (all in containers)
-scripts/e2e.sh      # full stack + testbed
+scripts/e2e.sh      # full stack + testbed: known CVEs, triage, central scans and retirement end to end
 scripts/go.sh …     # any go command in the pinned toolchain container
 scripts/npm.sh …    # any npm command for web/
 ```
+
+The proving ground runs a deliberately vulnerable "VM" (Debian 12 with log4j 2.14.1, old Django and lodash manifests) and a Docker agent watching an outdated Alpine container.
 
 > `testbed/` pins deliberately vulnerable software. Never reuse those images or versions anywhere else.
 

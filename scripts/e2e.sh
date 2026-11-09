@@ -7,6 +7,8 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 [ -f .env ] || scripts/dev-env.sh
 set -a; . ./.env; set +a
+# Source build plus testbed, whatever an older .env says.
+export COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
 URL="http://localhost:${LABWARDEN_PORT:-8080}"
 JAR=$(mktemp) JAR2=$(mktemp)
 TLS=labwarden-e2e-tls # throwaway TLS server and its certificate volume

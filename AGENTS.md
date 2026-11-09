@@ -9,9 +9,9 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 1. **Code runs in Docker only.** Never run go, node or the app directly on the host. Use `scripts/go.sh`, `scripts/npm.sh`, `docker compose`.
 2. **Never commit or push to `main`.** All work happens on a branch and reaches `main` only through a merged pull request. Use small conventional commits, each one building and passing `scripts/test.sh`.
 3. **Never force-push**, on any branch. Never rewrite pushed history; update a branch by merging `main` into it.
-4. No secrets in git. Tokens and passwords live in the gitignored `.env` (generate with `scripts/dev-env.sh`). Ingest tokens are stored hashed.
+4. No secrets in git. Tokens and passwords live in the gitignored `.env` (for development, generate it with `scripts/dev-env.sh`). Ingest tokens are stored hashed.
 5. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
-6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, `docker-compose.yml`, the Settings snippets) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. Bump Grype and Syft together, deliberately.
+6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, `docker-compose.yml`, `docker-compose.dev.yml`, the Settings snippets) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. That includes our own dashboard image in `docker-compose.yml`: after each release, a follow-up PR bumps its tag and digest. Bump Grype and Syft together, deliberately.
 7. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check their current docs before writing against them.
 
 ## Layout
@@ -29,6 +29,8 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 | React UI (Vite, Chakra UI v3, TanStack Query), embedded into the binary | `web/` |
 | Agent script, installer, Docker agent image | `agent/` |
 | Proving ground (vulnerable "VM" + docker agent) | `testbed/` |
+| End-user Compose file: published dashboard image, hardening | `docker-compose.yml` |
+| Development override: source build and testbed, loaded through `COMPOSE_FILE` | `docker-compose.dev.yml` |
 | Security model, how to report a vulnerability | `README.md` (Security model), `docs/security-architecture.md` (for users), `SECURITY.md` |
 | Setup guides for users (Compose, agents, Caddy, nginx) | `docs/setup/` |
 
@@ -37,7 +39,8 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 ```bash
 scripts/test.sh          # go vet + go test + web typecheck/lint/build, all in containers
 scripts/e2e.sh           # full stack + testbed, asserts known CVEs arrive in the dashboard
-docker compose up -d --build   # dashboard on http://localhost:8080
+scripts/dev-env.sh       # .env with dev secrets and COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+docker compose up -d --build   # dashboard built from source on http://localhost:8080
 ```
 
 ## Contracts
