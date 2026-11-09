@@ -73,7 +73,7 @@ Create an enrollment token in **Settings → Enrollment tokens**, then follow th
 
 The SHA-256 in Settings comes from the same dashboard as `install.sh`, so over plain http it catches a broken download, not an attacker on the network: serve the dashboard over https for that (see Security model).
 
-**Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and rebuild every Docker agent. Existing tokens keep working as enrollment tokens. `install.sh` writes `agent.env` from the settings it is given, so pass `LABWARDEN_CA_FILE` and `LABWARDEN_DOCKER_URL` again whenever you re-run it.
+**Upgrading to agent 3.0** breaks compatibility: the server no longer accepts ingest tokens on its ingest endpoints, and `/api/v1/ingest/report` is gone. Upgrade the server, then re-run `install.sh` on every VM and update every Docker agent. Existing tokens keep working as enrollment tokens. `install.sh` writes `agent.env` from the settings it is given, so pass `LABWARDEN_CA_FILE` and `LABWARDEN_DOCKER_URL` again whenever you re-run it.
 
 ```bash
 # Linux VM (systemd or cron): download, check against the SHA-256 shown in Settings, run
@@ -84,11 +84,11 @@ sudo LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=<token> LABWARDEN_G
 sudo sh lw-install.sh --uninstall
 
 # Docker host (the Compose snippet in Settings adds a read-only socket proxy)
-docker build -t labwarden-agent agent/
 docker run -d --name labwarden-agent --restart unless-stopped \
   --read-only --tmpfs /tmp --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges:true \
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v labwarden-agent-db:/var/lib/labwarden \
-  -e LABWARDEN_URL=http://labwarden.lan:8080 -e LABWARDEN_TOKEN=<token> -e LABWARDEN_HOST=$(hostname) labwarden-agent
+  -e LABWARDEN_URL=http://labwarden.lan:8080 -e LABWARDEN_TOKEN=<token> -e LABWARDEN_HOST=$(hostname) \
+  ghcr.io/amanahlab/labwarden-agent:0.1.0@sha256:3eb0eb6aadb06e85b6b40b8edd42dc665f9ec508cc68be09fed1229c9ba22726
 ```
 
 With a self-signed dashboard certificate, download the installer with `curl --cacert ca.pem …` and pass `LABWARDEN_CA_FILE=ca.pem` to it; it keeps a copy in `/etc/labwarden/ca.pem`. Docker agents take `LABWARDEN_CA_FILE` with the file mounted in.
@@ -178,7 +178,7 @@ The proving ground runs a deliberately vulnerable "VM" (Debian 12 with log4j 2.1
 
 ### Releasing
 
-Push a version tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The release workflow (`.github/workflows/release.yml`) runs `scripts/test.sh`, then publishes `ghcr.io/amanahlab/labwarden` and `ghcr.io/amanahlab/labwarden-agent` for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z`, `X.Y` and `latest`, with SBOM and provenance attestations. Then open a follow-up PR that pins the new tag and its multi-arch index digest (`docker buildx imagetools inspect ghcr.io/amanahlab/labwarden:X.Y.Z`) in `docker-compose.yml`.
+Push a version tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The release workflow (`.github/workflows/release.yml`) runs `scripts/test.sh`, then publishes `ghcr.io/amanahlab/labwarden` and `ghcr.io/amanahlab/labwarden-agent` for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z`, `X.Y` and `latest`, with SBOM and provenance attestations. Then open a follow-up PR that pins the new tag and its multi-arch index digest (`docker buildx imagetools inspect ghcr.io/amanahlab/<image>:X.Y.Z`) everywhere the old one appears (`git grep -n 'ghcr.io/amanahlab/labwarden'`): the dashboard image in `docker-compose.yml`, the agent image in the Settings snippets (`web/src/pages/Settings.tsx`), `docs/setup/agent-docker.md` and this README.
 
 ## License
 

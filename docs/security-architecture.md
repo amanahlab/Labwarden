@@ -161,5 +161,5 @@ LabWarden is built for a home lab or a small trusted network. These are known ga
 
 The hardened release deliberately breaks compatibility:
 - Make sure the dashboard has an admin password of at least 12 characters. If you don't set one, the server now generates it on first start (see above).
-- Re-run the installer on every VM and rebuild every Docker agent, so each one enrolls and gets its own credential. Your existing ingest tokens keep working as enrollment tokens.
+- Re-run the installer on every VM and update every Docker agent, so each one enrolls and gets its own credential. Your existing ingest tokens keep working as enrollment tokens.
 - Pass `LABWARDEN_CA_FILE` and `LABWARDEN_DOCKER_URL` again if you use them, because the installer rewrites `agent.env` from the settings it is given.
