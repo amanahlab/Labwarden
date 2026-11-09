@@ -11,7 +11,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 3. **Never force-push**, on any branch. Never rewrite pushed history; update a branch by merging `main` into it.
 4. No secrets in git. Tokens and passwords live in the gitignored `.env` (generate with `scripts/dev-env.sh`). Ingest tokens are stored hashed.
 5. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
-6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, `docker-compose.yml`, the Settings snippets) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. Bump Grype and Syft together, deliberately.
+6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, `docker-compose.yml`, the Settings snippets) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. Bump Grype and Syft together, deliberately. Our own images (`ghcr.io/amanahlab/labwarden`, `ghcr.io/amanahlab/labwarden-agent`) are published by `.github/workflows/release.yml`; after each release, a follow-up PR pins the new tag and index digest in `docker-compose.yml`.
 7. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check their current docs before writing against them.
 
 ## Layout
@@ -31,6 +31,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 | Proving ground (vulnerable "VM" + docker agent) | `testbed/` |
 | Security model, how to report a vulnerability | `README.md` (Security model), `docs/security-architecture.md` (for users), `SECURITY.md` |
 | Setup guides for users (Compose, agents, Caddy, nginx) | `docs/setup/` |
+| Release: multi-arch (amd64 + arm64) images to GHCR on version tags | `.github/workflows/release.yml` |
 
 ## Build and test
 
