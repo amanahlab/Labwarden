@@ -36,8 +36,10 @@ const onError = (title: string) => (e: unknown) => toaster.create({ type: "error
 // host credentials cross the network readable by anyone on the path.
 const plainHTTP = window.location.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)
 
-// Release tag + multi-arch index digest (docker buildx imagetools inspect).
-const agentImage = "ghcr.io/amanahlab/labwarden-agent:0.1.1@sha256:c7b39b8834511148599db45d737627d6bcb13d32494472176ea8628780dfd767"
+// A release build embeds the agent image published with it (release.yml passes
+// AGENT_IMAGE to the Dockerfile). Other builds use this pin of the latest
+// release: tag + multi-arch index digest (docker buildx imagetools inspect).
+const agentImage = import.meta.env.VITE_AGENT_IMAGE || "ghcr.io/amanahlab/labwarden-agent:0.1.1@sha256:c7b39b8834511148599db45d737627d6bcb13d32494472176ea8628780dfd767"
 
 export function SettingsPage() {
   return (

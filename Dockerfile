@@ -15,7 +15,14 @@ WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
-RUN npm run build
+# release.yml passes the agent image it just published (tag@index digest), so the
+# Settings snippets of a release name its own agent. Empty: the pin in Settings.tsx.
+ARG AGENT_IMAGE=
+RUN case "$AGENT_IMAGE" in \
+      ""|ghcr.io/amanahlab/labwarden-agent:*@sha256:*) ;; \
+      *) echo "AGENT_IMAGE must be ghcr.io/amanahlab/labwarden-agent:<tag>@sha256:<digest>" >&2; exit 1 ;; \
+    esac \
+    && VITE_AGENT_IMAGE="$AGENT_IMAGE" npm run build
 
 FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS server
 WORKDIR /src

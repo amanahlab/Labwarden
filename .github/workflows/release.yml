@@ -5,9 +5,12 @@ name: release
 # pick the tag under "Use workflow from". Dispatching from a branch fails on
 # purpose, and re-dispatching an older tag moves `latest` back to it.
 #
+# The agent is published first, and the dashboard build embeds that agent's
+# tag@index digest in its Settings snippets, so each release shows its own agent.
+#
 # After each release, a follow-up PR pins the new tag and its multi-arch INDEX
-# digest in docker-compose.yml (docker buildx imagetools inspect
-# ghcr.io/amanahlab/labwarden:X.Y.Z). Never pin a platform digest: the index
+# digest wherever the old one appears (git grep -n 'ghcr.io/amanahlab/labwarden'),
+# found with docker buildx imagetools inspect. Never pin a platform digest: the index
 # also lists unknown/unknown attestation entries, and a platform digest would
 # lock every host to one architecture.
 
@@ -68,22 +71,39 @@ jobs:
 
       # provenance mode=max records every build arg in the published attestation:
       # never pass a secret as a build-arg.
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          build-args: VERSION=${{ github.ref_name }}
-          tags: ${{ steps.meta-server.outputs.tags }}
-          labels: ${{ steps.meta-server.outputs.labels }}
-          provenance: mode=max
-          sbom: true
-          push: true
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - id: agent
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: agent/
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta-agent.outputs.tags }}
           labels: ${{ steps.meta-agent.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          push: true
+      # Fail unless the pushed digest is the multi-arch index behind the new tag:
+      # a platform digest would lock Docker hosts to one architecture.
+      - id: agent-image
+        env:
+          REF: ghcr.io/amanahlab/labwarden-agent:${{ steps.meta-agent.outputs.version }}
+          DIGEST: ${{ steps.agent.outputs.digest }}
+        run: |
+          index=$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' |
+            jq -r 'select(.mediaType == "application/vnd.oci.image.index.v1+json") | .digest')
+          if [ -z "$DIGEST" ] || [ "$index" != "$DIGEST" ]; then
+            echo "::error::$REF: pushed digest '$DIGEST' is not the index digest '$index'"
+            exit 1
+          fi
+          echo "image=$REF@$DIGEST" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            AGENT_IMAGE=${{ steps.agent-image.outputs.image }}
+          tags: ${{ steps.meta-server.outputs.tags }}
+          labels: ${{ steps.meta-server.outputs.labels }}
           provenance: mode=max
           sbom: true
           push: true
