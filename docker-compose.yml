@@ -4,8 +4,8 @@ name: labwarden
 # Optional settings go in .env next to this file (see .env.example).
 services:
   labwarden:
-    # pinned by index digest after the v0.1.0 release (project rule 6)
-    image: ghcr.io/amanahlab/labwarden:0.1.0
+    # Release tag + multi-arch index digest (docker buildx imagetools inspect).
+    image: ghcr.io/amanahlab/labwarden:0.1.0@sha256:4f3b86bb85dd94bca9dd41fe04906ea40f2ef00070ccb07c43124ec137fdd4a1
     restart: unless-stopped
     # Writes only to /data (TMPDIR included); needs no capabilities.
     read_only: true
