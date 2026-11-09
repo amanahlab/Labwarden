@@ -12,7 +12,7 @@ A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog t
 
 ## Quick start
 
-Everything runs in Docker.
+Everything runs in Docker. For a real deployment (HTTPS with Caddy or nginx, agents with and without Docker, backups), follow the step-by-step [setup guides](docs/setup/README.md).
 
 ```bash
 scripts/dev-env.sh                 # writes .env with a random admin password and bootstrap token
@@ -72,7 +72,7 @@ A host that misses more than 2.5× its reported interval is marked **stale**. A 
 
 ## Installing agents
 
-Create an enrollment token in **Settings → Enrollment tokens**, then follow the snippets on that page. They are pre-filled with the dashboard URL. The token is only needed for the first run; revoking it later does not affect hosts that already enrolled.
+Create an enrollment token in **Settings → Enrollment tokens**, then follow the snippets on that page. They are pre-filled with the dashboard URL. The guides for the [Linux agent](docs/setup/agent-linux.md) and the [Docker agent](docs/setup/agent-docker.md) walk through every option. The token is only needed for the first run; revoking it later does not affect hosts that already enrolled.
 
 The SHA-256 in Settings comes from the same dashboard as `install.sh`, so over plain http it catches a broken download, not an attacker on the network: serve the dashboard over https for that (see Security model).
 

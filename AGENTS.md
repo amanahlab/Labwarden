@@ -30,6 +30,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 | Agent script, installer, Docker agent image | `agent/` |
 | Proving ground (vulnerable "VM" + docker agent) | `testbed/` |
 | Security model, how to report a vulnerability | `README.md` (Security model), `docs/security-architecture.md` (for users), `SECURITY.md` |
+| Setup guides for users (Compose, agents, Caddy, nginx) | `docs/setup/` |
 
 ## Build and test
 
