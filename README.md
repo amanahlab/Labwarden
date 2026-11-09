@@ -88,7 +88,7 @@ docker run -d --name labwarden-agent --restart unless-stopped \
   --read-only --tmpfs /tmp --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges:true \
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v labwarden-agent-db:/var/lib/labwarden \
   -e LABWARDEN_URL=http://labwarden.lan:8080 -e LABWARDEN_TOKEN=<token> -e LABWARDEN_HOST=$(hostname) \
-  ghcr.io/amanahlab/labwarden-agent:0.1.0@sha256:3eb0eb6aadb06e85b6b40b8edd42dc665f9ec508cc68be09fed1229c9ba22726
+  ghcr.io/amanahlab/labwarden-agent:0.1.1@sha256:c7b39b8834511148599db45d737627d6bcb13d32494472176ea8628780dfd767
 ```
 
 With a self-signed dashboard certificate, download the installer with `curl --cacert ca.pem …` and pass `LABWARDEN_CA_FILE=ca.pem` to it; it keeps a copy in `/etc/labwarden/ca.pem`. Docker agents take `LABWARDEN_CA_FILE` with the file mounted in.
