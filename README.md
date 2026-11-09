@@ -170,6 +170,10 @@ scripts/npm.sh …    # any npm command for web/
 
 > `testbed/` pins deliberately vulnerable software. Never reuse those images or versions anywhere else.
 
+### Releasing
+
+Push a version tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The release workflow (`.github/workflows/release.yml`) runs `scripts/test.sh`, then publishes `ghcr.io/amanahlab/labwarden` and `ghcr.io/amanahlab/labwarden-agent` for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z`, `X.Y` and `latest`, with SBOM and provenance attestations. Then open a follow-up PR that pins the new tag and its multi-arch index digest (`docker buildx imagetools inspect ghcr.io/amanahlab/labwarden:X.Y.Z`) in `docker-compose.yml`.
+
 ## License
 
 LabWarden is licensed under the [GNU Affero General Public License v3.0](LICENSE).

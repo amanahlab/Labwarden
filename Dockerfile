@@ -2,19 +2,22 @@
 # (cataloging central images). Bump both together with the agent's SYFT_VERSION.
 # Images are pinned by tag and by the digest of their multi-arch index
 # (docker buildx imagetools inspect <image>).
+# Multi-arch: the web and server stages run on the build platform (the UI does
+# not depend on the architecture, Go cross-compiles); grype, syft and alpine
+# are pulled per target platform.
 ARG GRYPE_VERSION=v0.121.2
 ARG GRYPE_DIGEST=sha256:6a36234da13f9faa327306ac0b3dab3405cfa2b4eb20c8f904125a8707863913
 ARG SYFT_VERSION=v1.57.0
 ARG SYFT_DIGEST=sha256:3c70e6d5979364cefdc22b51617a78fd264574d3bd6b4f84a351204147025e2a
 
-FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS web
+FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.27-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS server
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:fa3d596898d9f126af7c01d14ee7597bab3f39cccf392ef36b69fe77cd681f18 AS server
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -23,7 +26,9 @@ COPY agent/ agent/
 COPY web/embed.go web/
 COPY --from=web /web/dist web/dist
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/labwarden ./server/cmd/labwarden
+# Declared late so the layers above are shared by every target platform.
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/labwarden ./server/cmd/labwarden
 
 FROM anchore/grype:${GRYPE_VERSION}@${GRYPE_DIGEST} AS grype
 FROM anchore/syft:${SYFT_VERSION}@${SYFT_DIGEST} AS syft

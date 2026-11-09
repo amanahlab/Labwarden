@@ -1,0 +1,89 @@
+name: release
+
+# Publishes the multi-arch (amd64 + arm64) server and agent images to GHCR when
+# a vX.Y.Z tag is pushed. workflow_dispatch reruns a release without retagging:
+# pick the tag under "Use workflow from". Dispatching from a branch fails on
+# purpose, and re-dispatching an older tag moves `latest` back to it.
+#
+# After each release, a follow-up PR pins the new tag and its multi-arch INDEX
+# digest in docker-compose.yml (docker buildx imagetools inspect
+# ghcr.io/amanahlab/labwarden:X.Y.Z). Never pin a platform digest: the index
+# also lists unknown/unknown attestation entries, and a platform digest would
+# lock every host to one architecture.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      # metadata-action emits semver tags only for a semver tag ref; anything
+      # else would reach the push with no image tag.
+      - name: Require a vX.Y.Z tag
+        run: |
+          case "$GITHUB_REF_TYPE:$GITHUB_REF_NAME" in
+            tag:v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::run this workflow from a vX.Y.Z tag, not from $GITHUB_REF_NAME"; exit 1 ;;
+          esac
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A tag never publishes a build that fails the tests.
+      - run: scripts/test.sh
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Image names are lowercase on purpose: the repository is amanahlab/Labwarden.
+      # Tags: X.Y.Z, X.Y and latest (flavor latest=auto adds it for a release
+      # tag, not for a pre-release such as v1.2.0-rc.1). The OCI labels include
+      # org.opencontainers.image.source, which links the package to the repo.
+      - id: meta-server
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/amanahlab/labwarden
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - id: meta-agent
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/amanahlab/labwarden-agent
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      # provenance mode=max records every build arg in the published attestation:
+      # never pass a secret as a build-arg.
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ github.ref_name }}
+          tags: ${{ steps.meta-server.outputs.tags }}
+          labels: ${{ steps.meta-server.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          push: true
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: agent/
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta-agent.outputs.tags }}
+          labels: ${{ steps.meta-agent.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+          push: true
