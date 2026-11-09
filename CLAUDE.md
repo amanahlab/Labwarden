@@ -12,7 +12,7 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 3. **Never force-push**, on any branch. Never rewrite pushed history; update a branch by merging `main` into it.
 4. No secrets in git. Tokens and passwords live in the gitignored `.env` (for development, generate it with `scripts/dev-env.sh`). Ingest tokens are stored hashed.
 5. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
-6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, `docker-compose.yml`, `docker-compose.dev.yml`, the Settings snippets) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. That includes our own dashboard image in `docker-compose.yml`: after each release, a follow-up PR bumps its tag and digest. Bump Grype and Syft together, deliberately.
+6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, `docker-compose.yml`, `docker-compose.dev.yml`, the Settings snippets) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. Bump Grype and Syft together, deliberately. Our own images (`ghcr.io/amanahlab/labwarden`, `ghcr.io/amanahlab/labwarden-agent`) are published by `.github/workflows/release.yml`; after each release, a follow-up PR pins the new tag and index digest in `docker-compose.yml`.
 7. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check current docs with ctx7 before writing against them.
 
 ## Layout
@@ -34,6 +34,7 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 | Development override: source build and testbed, loaded through `COMPOSE_FILE` | `docker-compose.dev.yml` |
 | Security model, how to report a vulnerability | `README.md` (Security model), `docs/security-architecture.md` (for users), `SECURITY.md` |
 | Setup guides for users (Compose, agents, Caddy, nginx) | `docs/setup/` |
+| Release: multi-arch (amd64 + arm64) images to GHCR on version tags | `.github/workflows/release.yml` |
 
 ## Build and test
 
