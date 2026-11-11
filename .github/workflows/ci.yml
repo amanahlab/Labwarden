@@ -17,10 +17,6 @@ jobs:
       fail-fast: false
       matrix:
         section: [go, web, vuln, shell]
-    env:
-      # scripts/go.sh bind-mounts these instead of its named volumes.
-      LABWARDEN_GOMODCACHE: ${{ runner.temp }}/gomod
-      LABWARDEN_GOCACHE: ${{ runner.temp }}/gocache
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Compiled dependencies (modernc sqlite above all) stay valid while our
@@ -34,6 +30,10 @@ jobs:
           key: go-${{ matrix.section }}-${{ runner.os }}-${{ hashFiles('go.sum', 'scripts/go.sh') }}
           restore-keys: go-${{ matrix.section }}-${{ runner.os }}-
       - run: scripts/test.sh ${{ matrix.section }}
+        env:
+          # scripts/go.sh bind-mounts these instead of its named volumes.
+          LABWARDEN_GOMODCACHE: ${{ runner.temp }}/gomod
+          LABWARDEN_GOCACHE: ${{ runner.temp }}/gocache
 
   image:
     runs-on: ubuntu-24.04
