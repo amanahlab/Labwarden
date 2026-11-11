@@ -172,6 +172,7 @@ scripts/dev-env.sh                               # .env with an admin password, 
 docker compose up -d --build                     # http://localhost:8080 (password: grep LABWARDEN_ADMIN_PASSWORD .env)
 docker compose --profile testbed up -d --build   # plus the proving ground
 scripts/test.sh     # go vet + go test, web lint + typecheck + build, shellcheck (all in containers)
+scripts/test.sh go  # one or more sections only: go, web, vuln, shell
 scripts/e2e.sh      # full stack + testbed: known CVEs, triage, central scans and retirement end to end
 scripts/go.sh …     # any go command in the pinned toolchain container
 scripts/npm.sh …    # any npm command for web/
