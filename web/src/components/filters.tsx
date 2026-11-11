@@ -1,7 +1,7 @@
 import { Button, HStack, Text } from "@chakra-ui/react"
-import { LuFlame, LuX } from "react-icons/lu"
+import { LuX } from "react-icons/lu"
 import { SEVERITIES, type Severity } from "@/lib/api"
-import { SevDot } from "@/components/common"
+import { KevMark, SevDot } from "@/components/common"
 
 // Toggle chips for multi-select severity filtering (dot + label, never color alone).
 export function SeverityChips({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
@@ -31,8 +31,8 @@ export function SeverityChips({ value, onChange }: { value: string[]; onChange: 
 
 export function KevToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
   return (
-    <Button size="xs" variant={value ? "solid" : "outline"} colorPalette={value ? "red" : "gray"} bg={value ? undefined : "surface"} aria-pressed={value} onClick={() => onChange(!value)}>
-      <LuFlame /> Known exploited
+    <Button size="xs" variant={value ? "solid" : "outline"} colorPalette="gray" bg={value ? undefined : "surface"} aria-pressed={value} onClick={() => onChange(!value)}>
+      <KevMark /> Known exploited
     </Button>
   )
 }
