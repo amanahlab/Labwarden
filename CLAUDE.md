@@ -40,6 +40,7 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 
 ```bash
 scripts/test.sh          # go vet + go test + web typecheck/lint/build, all in containers
+scripts/test.sh go web    # only these sections (go, web, vuln, shell); CI runs each as a parallel job
 scripts/e2e.sh           # full stack + testbed, asserts known CVEs arrive in the dashboard
 scripts/dev-env.sh       # .env with dev secrets and COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
 docker compose up -d --build   # dashboard built from source on http://localhost:8080
