@@ -14,7 +14,13 @@ check_go() {
 
 check_web() {
   echo "== web lint / build"
-  [ -d web/node_modules ] || scripts/npm.sh ci --no-audit --no-fund
+  # Reinstall when the lockfile is newer than the last install (npm writes
+  # node_modules/.package-lock.json at the end of every install), e.g. after a
+  # pull or branch switch that added a dependency.
+  if [ ! -f web/node_modules/.package-lock.json ] ||
+    [ -n "$(find web/package-lock.json -newer web/node_modules/.package-lock.json)" ]; then
+    scripts/npm.sh ci --no-audit --no-fund
+  fi
   scripts/npm.sh run lint
   scripts/npm.sh run build
 }
