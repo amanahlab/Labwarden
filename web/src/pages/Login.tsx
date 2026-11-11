@@ -25,7 +25,7 @@ export function LoginPage() {
   }
 
   return (
-    <Center minH="100vh" p="4" bg="bg.subtle">
+    <Center minH="100vh" p="4" bg="canvas">
       <Card.Root w="full" maxW="sm" variant="elevated" bg="surface">
         <Card.Body>
           <form onSubmit={submit}>

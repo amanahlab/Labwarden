@@ -63,7 +63,16 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
           fontWeight="medium"
           color="fg.muted"
           _hover={{ bg: "bg.muted", color: "fg" }}
-          css={{ "&.active": { bg: "colorPalette.subtle", color: "colorPalette.fg" } }}
+          // On the neutral palette the hover gray is close to any active fill,
+          // so the active item also gets a heavier weight and an Ink edge bar.
+          css={{
+            "&.active": {
+              bg: "colorPalette.muted",
+              color: "fg",
+              fontWeight: "semibold",
+              boxShadow: "inset 3px 0 0 {colors.colorPalette.solid}",
+            },
+          }}
         >
           <n.icon size={16} />
           {n.label}
