@@ -1,4 +1,9 @@
-# LabWarden
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/masters/labwarden-horizontal-reversed.svg">
+    <img src="docs/brand/masters/labwarden-horizontal-color.svg" alt="LabWarden" width="320">
+  </picture>
+</h1>
 
 A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog their packages with [Syft](https://github.com/anchore/syft) on a schedule and push the SBOMs to one central server. The server matches them with [Grype](https://github.com/anchore/grype) against the only copy of the vulnerability DB, tracks what is new or fixed, and shows everything in a web UI. When a new DB arrives each night, every stored SBOM is matched again.
 

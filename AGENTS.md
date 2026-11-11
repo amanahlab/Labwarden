@@ -13,6 +13,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 5. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
 6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, `docker-compose.yml`, `docker-compose.dev.yml`, the Settings snippets) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. Bump Grype and Syft together, deliberately. Our own images (`ghcr.io/amanahlab/labwarden`, `ghcr.io/amanahlab/labwarden-agent`) are published by `.github/workflows/release.yml`; the release embeds its own agent image in the dashboard's Settings snippets (build arg `AGENT_IMAGE`). After each release, a follow-up PR pins the new tag and index digest in `docker-compose.yml` (dashboard) and in `docs/setup/agent-docker.md`, `README.md` and the Settings fallback (agent).
 7. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check their current docs before writing against them.
+8. Brand: the logo and palette live in `docs/brand/` (read `GUIDELINES.md` first). Use the `brand` and `canvas`/`surface` theme tokens, keep Signal orange for the logo light and the KEV marker only, and never retype the wordmark in a font: use the `Brand.tsx` components.
 
 ## Layout
 
@@ -33,6 +34,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 | Development override: source build and testbed, loaded through `COMPOSE_FILE` | `docker-compose.dev.yml` |
 | Security model, how to report a vulnerability | `README.md` (Security model), `docs/security-architecture.md` (for users), `SECURITY.md` |
 | Setup guides for users (Compose, agents, Caddy, nginx) | `docs/setup/` |
+| Logo masters, guidelines, generator scripts (dashboard copies in `web/public/` and `web/src/assets/brand/`) | `docs/brand/` |
 | Release: multi-arch (amd64 + arm64) images to GHCR on version tags | `.github/workflows/release.yml` |
 
 ## Build and test
