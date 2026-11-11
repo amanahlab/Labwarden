@@ -13,19 +13,11 @@ import {
   LuShieldAlert,
   LuSearch,
 } from "react-icons/lu"
+import { BrandLockup } from "@/components/Brand"
 import { ColorModeButton } from "@/components/ui/color-mode"
 import { Tooltip } from "@/components/ui/tooltip"
 import { api, type Me, type Summary } from "@/lib/api"
 import { num } from "@/lib/format"
-
-export function Logo({ size = 28 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true">
-      <path fill="#2a78d6" d="M16 2 4 6.5v8.8C4 22.6 9.1 28.6 16 30c6.9-1.4 12-7.4 12-14.7V6.5z" />
-      <path fill="#fff" d="m10.2 10.5 3.2 0 2.6 7.6 2.6-7.6 3.2 0L17.6 21.5h-3.2z" />
-    </svg>
-  )
-}
 
 const NAV = [
   { to: "/", label: "Overview", icon: LuGauge, end: true },
@@ -82,14 +74,12 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+// The wordmark is artwork: never retype "LabWarden" in a font next to the symbol.
 function Brand() {
   return (
-    <HStack gap="2.5" px="3" mb="6">
-      <Logo />
-      <Text fontWeight="bold" textStyle="lg" letterSpacing="-0.02em">
-        LabWarden
-      </Text>
-    </HStack>
+    <Box px="3" mb="6">
+      <BrandLockup />
+    </Box>
   )
 }
 

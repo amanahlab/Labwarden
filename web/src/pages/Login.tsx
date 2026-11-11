@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Alert, Box, Button, Card, Center, Field, Heading, Input, Stack, Text } from "@chakra-ui/react"
 import { api, ApiError } from "@/lib/api"
-import { Logo } from "@/components/Layout"
+import { BrandSymbol } from "@/components/Brand"
 
 export function LoginPage() {
   const qc = useQueryClient()
@@ -31,7 +31,7 @@ export function LoginPage() {
           <form onSubmit={submit}>
             <Stack gap="6">
               <Stack gap="3" align="center" textAlign="center">
-                <Logo size={40} />
+                <BrandSymbol size={56} />
                 <Box>
                   <Heading size="lg">Sign in to LabWarden</Heading>
                   <Text color="fg.muted" textStyle="sm">
