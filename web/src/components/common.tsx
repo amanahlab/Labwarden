@@ -29,7 +29,6 @@ import {
   LuCircleAlert,
   LuClock,
   LuEyeOff,
-  LuFlame,
   LuInbox,
   LuSearch,
   LuShieldCheck,
@@ -37,7 +36,7 @@ import {
   LuBan,
 } from "react-icons/lu"
 import { Tooltip } from "@/components/ui/tooltip"
-import { SEVERITY_COLORS } from "@/theme"
+import { BRAND, SEVERITY_COLORS } from "@/theme"
 import type { Counts, HostStatus, Severity, TriageStatus } from "@/lib/api"
 import { num, statusLabel } from "@/lib/format"
 
@@ -100,11 +99,21 @@ export function SeverityBadge({ severity }: { severity: Severity }) {
   )
 }
 
+// The logo's alert light, reused as the known-exploited marker. Always Signal,
+// and only on neutral grounds (white, Ink, surface): never on red.
+export function KevMark() {
+  return (
+    <svg width="1em" height="1em" viewBox="0 0 10 10" aria-hidden="true" style={{ flexShrink: 0 }}>
+      <path fill={BRAND.signal} d="M5 0L10 5L5 10L0 5Z" />
+    </svg>
+  )
+}
+
 export function KevBadge() {
   return (
     <Tooltip content="Listed in CISA Known Exploited Vulnerabilities">
-      <Badge colorPalette="red" variant="solid" size="sm" gap="1">
-        <LuFlame /> KEV
+      <Badge colorPalette="gray" variant="solid" size="sm" gap="1">
+        <KevMark /> KEV
       </Badge>
     </Tooltip>
   )

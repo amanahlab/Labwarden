@@ -2,10 +2,10 @@ import type { ReactNode } from "react"
 import { Link } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import { Badge, Box, Button, Card, Grid, GridItem, HStack, Link as CLink, SegmentGroup, SimpleGrid, Skeleton, Stack, Table, Text } from "@chakra-ui/react"
-import { LuArrowRight, LuClock, LuFlame, LuServer, LuShieldAlert, LuShieldCheck, LuSparkles } from "react-icons/lu"
+import { LuArrowRight, LuClock, LuServer, LuShieldAlert, LuShieldCheck, LuSparkles } from "react-icons/lu"
 import { api, type DailyStat, type Summary } from "@/lib/api"
 import { ago, num, pct } from "@/lib/format"
-import { ErrorBox, Header, KevBadge, PageHeader, Panel, SeverityBadge, SeverityCounts, Empty } from "@/components/common"
+import { ErrorBox, Header, KevBadge, KevMark, PageHeader, Panel, SeverityBadge, SeverityCounts, Empty } from "@/components/common"
 import { RankedBars, SeverityDonut, SeverityTrend } from "@/components/charts"
 import { useParamsState } from "@/lib/useParamsState"
 
@@ -98,7 +98,7 @@ export function OverviewPage() {
       <SimpleGrid columns={{ base: 2, lg: 3, xl: 6 }} gap="4" mb="4">
         <Kpi label="Critical" value={num(s.unique.critical)} hint={`${num(s.findings.critical)} affected packages`} icon={<LuShieldAlert />} tone="sev.critical" to="/vulnerabilities?severity=Critical" />
         <Kpi label="High" value={num(s.unique.high)} hint={`${num(s.findings.high)} affected packages`} icon={<LuShieldAlert />} tone="sev.high" to="/vulnerabilities?severity=High" />
-        <Kpi label="Known exploited" value={num(s.kev)} hint="CISA KEV catalog" icon={<LuFlame />} tone="red.fg" to="/vulnerabilities?kev=true" />
+        <Kpi label="Known exploited" value={num(s.kev)} hint="CISA KEV catalog" icon={<KevMark />} to="/vulnerabilities?kev=true" />
         <Kpi label="Fix available" value={pct(fixable, 0)} hint={`${num(s.findings.fixable)} of ${num(s.findings.total)} findings`} icon={<LuShieldCheck />} tone="green.fg" to="/vulnerabilities?fix=fixed" />
         <Kpi label="New this week" value={num(s.new_last_7d)} hint={`${num(s.scans_24h)} scans in 24h`} icon={<LuSparkles />} to="/vulnerabilities?sort=first_seen&order=desc" />
         <Kpi
