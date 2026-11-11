@@ -9,12 +9,22 @@ permissions:
   contents: read
 
 jobs:
+  # Same entrypoint as local development (everything runs in containers), one
+  # scripts/test.sh section per job so they run in parallel.
   test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        section: [go, web, vuln, shell]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: scripts/test.sh ${{ matrix.section }}
+
+  image:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Same entrypoint as local development: everything runs in containers.
-      - run: scripts/test.sh
       # The end-user file must work without a clone or .env: no ${X:?}, no build:.
       - run: |
           docker compose -f docker-compose.yml config -q
