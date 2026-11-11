@@ -32,9 +32,9 @@ const config = defineConfig({
   theme: {
     tokens: {
       fonts: {
-        heading: { value: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" },
-        body: { value: "Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" },
-        mono: { value: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" },
+        heading: { value: "'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" },
+        body: { value: "'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif" },
+        mono: { value: "'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" },
       },
     },
     semanticTokens: {
