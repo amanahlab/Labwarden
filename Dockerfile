@@ -28,13 +28,17 @@ FROM --platform=$BUILDPLATFORM golang:1.27-alpine@sha256:eb61c3873c97416fff01165
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
+# Declared after the download so that layer is shared by every target platform.
+ARG TARGETOS TARGETARCH
+# Compile the direct dependencies (modernc sqlite dominates) in a layer that
+# only go.mod and go.sum invalidate; a source change then compiles our code only.
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
+      $(go list -m -f '{{if not (or .Main .Indirect)}}{{.Path}}{{end}}' all)
 COPY server/ server/
 COPY agent/ agent/
 COPY web/embed.go web/
 COPY --from=web /web/dist web/dist
 ARG VERSION=dev
-# Declared late so the layers above are shared by every target platform.
-ARG TARGETOS TARGETARCH
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/labwarden ./server/cmd/labwarden
 
 FROM anchore/grype:${GRYPE_VERSION}@${GRYPE_DIGEST} AS grype
