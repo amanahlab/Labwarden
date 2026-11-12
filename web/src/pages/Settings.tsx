@@ -24,7 +24,7 @@ import {
 } from "@chakra-ui/react"
 import { LuBell, LuCloud, LuDownload, LuKeyRound, LuLogOut, LuPlay, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu"
 import { api, type AgentCredential, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
-import { ago, dateTime } from "@/lib/format"
+import { ago, dateTime, interval } from "@/lib/format"
 import { agentSnippets, TTL_OPTIONS } from "@/lib/agent"
 import { useSheet } from "@/lib/useSheet"
 import { CodeBlock, DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel, Select, Step } from "@/components/common"
@@ -576,11 +576,10 @@ function ImageCheckStatus({ c, pending }: { c: SystemInfo["image_check"]; pendin
         Off (<Code size="sm">LABWARDEN_IMAGE_CHECK=false</Code>): running images are not compared with their registries.
       </Text>
     )
-  const every = c.interval_hours % 24 === 0 ? `${c.interval_hours / 24} d` : `${c.interval_hours} h`
   return (
     <Stack gap="0">
       <Text>
-        Every {every} · last check {ago(c.last_checked)}
+        Every {interval(c.interval_hours * 3600)} · last check {ago(c.last_checked)}
         {pending > 0 && ` · ${pending} pending`}
       </Text>
       <Text textStyle="xs" color="fg.muted">

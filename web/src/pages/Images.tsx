@@ -13,7 +13,7 @@ import { Tooltip } from "@/components/ui/tooltip"
 
 const DEFAULTS = { sort: "name", order: "asc", size: "25" }
 const FILTER_KEYS = ["q", "host", "registry", "status"]
-const COLS = 9
+const COLS = 8
 
 // Yellow, not orange, for "needs a look": orange on screen is the KEV
 // diamond only. The palette-less statuses are quiet outlines.
@@ -97,7 +97,6 @@ export function ImagesPage() {
             <Header>Newest</Header>
             <SortHeader label="Built" k="created" {...sh} />
             <SortHeader label="Running since" k="first_seen" {...sh} />
-            <SortHeader label="Checked" k="checked" {...sh} />
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -106,7 +105,7 @@ export function ImagesPage() {
             <Table.Row key={`${r.repository}|${r.tag}|${r.pinned_digest}|${r.digest || r.image_id}`}>
               <Table.Cell>
                 <Stack gap="0" minW="0">
-                  <Text fontWeight="semibold" truncate maxW="72">
+                  <Text fontWeight="semibold" truncate maxW="60">
                     {r.name}
                   </Text>
                   <Text textStyle="xs" color="fg.muted">
@@ -121,7 +120,7 @@ export function ImagesPage() {
               <Table.Cell>
                 <Stack gap="1">
                   {r.hosts.map((h) => (
-                    <Text key={h.id} textStyle="sm" truncate maxW="72">
+                    <Text key={h.id} textStyle="sm" truncate maxW="56">
                       <CLink asChild fontWeight="medium">
                         <Link to={`/hosts/${h.id}`}>{h.name}</Link>
                       </CLink>
@@ -155,17 +154,6 @@ export function ImagesPage() {
                   <span>{ago(r.first_seen)}</span>
                 </Tooltip>
               </Table.Cell>
-              <Table.Cell color="fg.muted" whiteSpace="nowrap">
-                {r.checked_at ? (
-                  <Tooltip content={dateTime(r.checked_at)}>
-                    <span>{ago(r.checked_at)}</span>
-                  </Tooltip>
-                ) : (
-                  <Text as="span" color="fg.subtle">
-                    —
-                  </Text>
-                )}
-              </Table.Cell>
             </Table.Row>
           ))}
           {rows && rows.length === 0 && (
@@ -190,10 +178,10 @@ export function ImagesPage() {
   )
 }
 
-function ImageStatusBadge({ status }: { status: ImageStatus }) {
+function ImageStatusBadge({ status, checked }: { status: ImageStatus; checked?: string }) {
   const s = STATUS[status] ?? STATUS.unchecked
   return (
-    <Tooltip content={s.hint}>
+    <Tooltip content={checked ? `${s.hint}. Checked ${ago(checked)}.` : s.hint}>
       {s.palette ? (
         <Badge colorPalette={s.palette} variant="subtle" size="sm" gap="1">
           {s.icon}
@@ -226,14 +214,15 @@ function StatusCell({ row }: { row: ImageRow }) {
   const waiting = row.status === "outdated" ? daysSince(row.update_since) : undefined
   const age = [
     built !== undefined && `running build ${plural(built, "day")} old`,
-    waiting !== undefined && (waiting === 0 ? "update available since today" : `update available for ${plural(waiting, "day")}`),
+    // Under a day old it says nothing the badge does not: every row looks like that right after the first check.
+    !!waiting && `update available for ${plural(waiting, "day")}`,
   ]
     .filter(Boolean)
     .join(" · ")
   return (
-    <Stack gap="1" align="start">
+    <Stack gap="1" align="start" w="48">
       <HStack gap="1" wrap="wrap">
-        <ImageStatusBadge status={row.status} />
+        <ImageStatusBadge status={row.status} checked={row.checked_at} />
         {row.drift && (
           <Tooltip content={`The tag ${row.tag} now points at ${row.upstream_digest}`}>
             <Badge variant="outline" size="sm">
@@ -244,7 +233,7 @@ function StatusCell({ row }: { row: ImageRow }) {
       </HStack>
       {age && (
         <Tooltip content={[row.image_created && `Built ${dateTime(row.image_created)}`, row.update_since && `Update seen ${dateTime(row.update_since)}`].filter(Boolean).join(" · ")}>
-          <Text textStyle="xs" color="fg.muted">
+          <Text textStyle="xs" color="fg.muted" whiteSpace="normal">
             {age[0].toUpperCase() + age.slice(1)}
           </Text>
         </Tooltip>
