@@ -3,7 +3,7 @@ import { Link } from "react-router"
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Badge, Button, Clipboard, HStack, IconButton, Link as CLink, Stack, Table, Text } from "@chakra-ui/react"
 import { LuCircleAlert, LuCircleArrowUp, LuCircleCheck, LuCircleDashed, LuContainer, LuHammer, LuPin, LuRefreshCw, LuSearchX } from "react-icons/lu"
-import { api, ApiError, type HostRow, type ImageRow, type ImageStatus, type List, type SystemInfo } from "@/lib/api"
+import { api, ApiError, type ImageRow, type ImageStatus, type List, type SystemInfo } from "@/lib/api"
 import { ago, dateTime, num } from "@/lib/format"
 import { useParamsState } from "@/lib/useParamsState"
 import { DataTable, Empty, ErrorBox, FilterBar, Header, LoadingRows, Mono, PageHeader, Pager, SearchInput, Select, SortHeader, Toolbar } from "@/components/common"
@@ -49,8 +49,9 @@ export function ImagesPage() {
     refetchInterval: checking ? 5_000 : false,
   })
   const hosts = useQuery({
-    queryKey: ["hosts", { kind: "docker", size: 500, sort: "name", order: "asc" }],
-    queryFn: () => api.get<List<HostRow>>("/hosts", { kind: "docker", size: 500, sort: "name", order: "asc" }),
+    // Hosts that report containers, whatever their kind.
+    queryKey: ["images", "hosts"],
+    queryFn: () => api.get<{ id: number; name: string }[]>("/images/hosts"),
   })
   const registries = useQuery({ queryKey: ["images", "registries"], queryFn: () => api.get<string[]>("/images/registries") })
   const hasFilters = FILTER_KEYS.some((k) => ps.sp.has(k))
@@ -71,7 +72,7 @@ export function ImagesPage() {
           label="Host"
           value={filters.host}
           onChange={(v) => ps.set({ host: v })}
-          options={(hosts.data?.items ?? []).map((h): [string, string] => [String(h.id), h.name])}
+          options={(hosts.data ?? []).map((h): [string, string] => [String(h.id), h.name])}
           placeholder="All hosts"
         />
         <Select label="Registry" value={filters.registry} onChange={(v) => ps.set({ registry: v })} options={registries.data ?? []} placeholder="All registries" />
@@ -96,7 +97,7 @@ export function ImagesPage() {
             <SortHeader label="Status" k="status" {...sh} />
             <Header>Newest</Header>
             <SortHeader label="Built" k="created" {...sh} />
-            <SortHeader label="Running since" k="first_seen" {...sh} />
+            <SortHeader label="First seen" k="first_seen" {...sh} />
           </Table.Row>
         </Table.Header>
         <Table.Body>
@@ -105,9 +106,11 @@ export function ImagesPage() {
             <Table.Row key={`${r.repository}|${r.tag}|${r.pinned_digest}|${r.digest || r.image_id}`}>
               <Table.Cell>
                 <Stack gap="0" minW="0">
-                  <Text fontWeight="semibold" truncate maxW="60">
-                    {r.name}
-                  </Text>
+                  <Tooltip content={r.repository || r.name}>
+                    <Text fontWeight="semibold" truncate maxW="60">
+                      {r.name}
+                    </Text>
+                  </Tooltip>
                   <Text textStyle="xs" color="fg.muted">
                     {num(r.containers)} container{r.containers === 1 ? "" : "s"}
                   </Text>
@@ -120,15 +123,17 @@ export function ImagesPage() {
               <Table.Cell>
                 <Stack gap="1">
                   {r.hosts.map((h) => (
-                    <Text key={h.id} textStyle="sm" truncate maxW="56">
-                      <CLink asChild fontWeight="medium">
-                        <Link to={`/hosts/${h.id}`}>{h.name}</Link>
-                      </CLink>
-                      <Text as="span" color="fg.muted">
-                        {" · "}
-                        {h.containers.join(", ")}
+                    <Tooltip key={h.id} content={`${h.name} · ${h.containers.join(", ")}`}>
+                      <Text textStyle="sm" truncate maxW="56">
+                        <CLink asChild fontWeight="medium">
+                          <Link to={`/hosts/${h.id}`}>{h.name}</Link>
+                        </CLink>
+                        <Text as="span" color="fg.muted">
+                          {" · "}
+                          {h.containers.join(", ")}
+                        </Text>
                       </Text>
-                    </Text>
+                    </Tooltip>
                   ))}
                 </Stack>
               </Table.Cell>

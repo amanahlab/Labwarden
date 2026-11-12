@@ -102,6 +102,9 @@ func TestReplaceHostImagesAndList(t *testing.T) {
 	if regs, err := s.ImageRegistries(ctx); err != nil || len(regs) != 0 {
 		t.Errorf("registries = %v, %v", regs, err)
 	}
+	if hosts, err := s.ImageHosts(ctx); err != nil || len(hosts) != 0 {
+		t.Errorf("hosts = %v, %v", hosts, err)
+	}
 }
 
 func TestReplaceHostImagesUnknownHost(t *testing.T) {

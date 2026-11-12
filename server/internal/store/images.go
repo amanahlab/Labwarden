@@ -258,6 +258,31 @@ func imageHosts(members string) ([]ImageHost, error) {
 	return out, nil
 }
 
+// ImageHostOption is a host that runs containers, for the filter.
+type ImageHostOption struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// ImageHosts lists the hosts that report running containers, whatever
+// their kind (a "vm" agent can scan Docker too).
+func (s *Store) ImageHosts(ctx context.Context) ([]ImageHostOption, error) {
+	rows, err := s.r.QueryContext(ctx, `SELECT DISTINCT h.id, h.name FROM container_images ci JOIN hosts h ON h.id = ci.host_id ORDER BY h.name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ImageHostOption{}
+	for rows.Next() {
+		var h ImageHostOption
+		if err := rows.Scan(&h.ID, &h.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
 // ImageRegistries lists the registries of running images, for the filter.
 func (s *Store) ImageRegistries(ctx context.Context) ([]string, error) {
 	rows, err := s.r.QueryContext(ctx, `SELECT DISTINCT registry FROM container_images WHERE registry <> '' ORDER BY registry`)

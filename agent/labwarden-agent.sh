@@ -256,39 +256,44 @@ docker_images() {
 
 # docker_inventory: a JSON array with every running container, the image
 # reference it was started from and that image's digests and build time, for
-# the Images page. Fails (and prints nothing useful) when the containers
-# cannot be listed, so a broken listing never empties the dashboard's list.
+# the Images page. Fails when any container cannot be listed or inspected: the
+# dashboard replaces the host's list with what it gets, so a partial list
+# would drop containers that still run. The next run tries again.
 docker_inventory() {
 	if command -v jq >/dev/null 2>&1; then
 		_filter=""
 		[ -n "$LABWARDEN_DOCKER_LABEL" ] && _filter="?filters=$(urlenc "{\"label\":[$(json_str "$LABWARDEN_DOCKER_LABEL")]}")"
 		docker_api "/containers/json$_filter" >"$WORK/ps.json" || return 1
-		jq -r '.[].Id' "$WORK/ps.json" | while read -r _c; do
+		jq -r '.[].Id' "$WORK/ps.json" >"$WORK/ps.txt" || return 1
+		# A redirected loop, not a pipe, so return leaves the function.
+		while read -r _c; do
 			# Config.Image from the inspect, not the list: the list shows an
 			# image ID once the tag has moved on to a newer image.
-			docker_api "/containers/$_c/json" >"$WORK/ci.json" 2>/dev/null || continue
-			_id=$(jq -r '.Image' "$WORK/ci.json")
+			docker_api "/containers/$_c/json" >"$WORK/ci.json" 2>/dev/null || return 1
+			_id=$(jq -r '.Image' "$WORK/ci.json") || return 1
+			# A removed image still runs: list the container without digests.
 			docker_api "/images/$_id/json" >"$WORK/ii.json" 2>/dev/null || echo '{}' >"$WORK/ii.json"
 			jq -c --slurpfile i "$WORK/ii.json" '{container: .Name, ref: .Config.Image, image_id: .Image,
-				repo_digests: ($i[0].RepoDigests // []), created: ($i[0].Created // "")}' "$WORK/ci.json"
-		done | jq -s -c .
+				repo_digests: ($i[0].RepoDigests // []), created: ($i[0].Created // "")}' "$WORK/ci.json" || return 1
+		done <"$WORK/ps.txt" >"$WORK/inventory.ndjson"
+		jq -s -c . "$WORK/inventory.ndjson"
 	elif command -v docker >/dev/null 2>&1; then
 		if [ -n "$LABWARDEN_DOCKER_LABEL" ]; then
 			docker ps -q --filter "label=$LABWARDEN_DOCKER_LABEL" >"$WORK/ps.txt" </dev/null || return 1
 		else
 			docker ps -q >"$WORK/ps.txt" </dev/null || return 1
 		fi
-		printf '['
+		_inv="["
 		_sep=""
 		while read -r _c; do
-			_meta=$(docker inspect --format '"container":{{json .Name}},"ref":{{json .Config.Image}},"image_id":{{json .Image}}' "$_c" </dev/null 2>/dev/null) || continue
-			_id=$(docker inspect --format '{{.Image}}' "$_c" </dev/null 2>/dev/null)
+			_meta=$(docker inspect --format '"container":{{json .Name}},"ref":{{json .Config.Image}},"image_id":{{json .Image}}' "$_c" </dev/null 2>/dev/null) || return 1
+			_id=$(docker inspect --format '{{.Image}}' "$_c" </dev/null 2>/dev/null) || return 1
 			_img=$(docker image inspect --format '"repo_digests":{{json .RepoDigests}},"created":{{json .Created}}' "$_id" </dev/null 2>/dev/null) ||
 				_img='"repo_digests":[],"created":""'
-			printf '%s{%s,%s}' "$_sep" "$_meta" "$_img"
+			_inv="$_inv$_sep{$_meta,$_img}"
 			_sep=,
 		done <"$WORK/ps.txt"
-		printf ']'
+		printf '%s]' "$_inv"
 	else
 		return 1
 	fi

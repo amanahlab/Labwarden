@@ -118,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/images", s.listImages)
 			r.Get("/images/registries", s.listImageRegistries)
 			r.Post("/images/check", s.checkImages)
+			r.Get("/images/hosts", s.listImageHosts)
 			r.Get("/groups", s.listGroups)
 			r.Get("/scans", s.listScans)
 			r.Get("/events", s.listEvents)

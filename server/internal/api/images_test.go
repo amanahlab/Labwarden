@@ -62,6 +62,10 @@ func TestRunReportsRunningImages(t *testing.T) {
 	if getJSON(t, c, ts.URL+"/api/v1/images/registries", &regs); len(regs) != 1 || regs[0] != "docker.io" {
 		t.Errorf("registries = %v", regs)
 	}
+	var hosts []store.ImageHostOption
+	if getJSON(t, c, ts.URL+"/api/v1/images/hosts", &hosts); len(hosts) != 1 || hosts[0].Name != "docker-1" || hosts[0].ID == 0 {
+		t.Errorf("hosts = %v", hosts)
+	}
 
 	// An older agent sends no list: what is stored stays.
 	old := `{"host":"docker-1","kind":"docker","run_id":"r2","status":"ok","targets":[]}`
