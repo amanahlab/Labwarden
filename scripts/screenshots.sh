@@ -39,13 +39,13 @@ cleanup
 docker volume create "$DATA" >/dev/null
 if docker volume inspect "$SRC" >/dev/null 2>&1; then
   echo "== copy findings from $SRC"
-  docker run --rm -v "$SRC:/src:ro" -v "$DATA:/dst" alpine:3.22 sh -c '
+  docker run --rm -v "$SRC:/src:ro" -v "$DATA:/dst" alpine:3.24 sh -c '
     for f in /src/labwarden.db*; do [ -e "$f" ] && cp -a "$f" /dst/; done
     [ -d /src/sboms ] && cp -a /src/sboms /dst/
     chown -R 10001:10001 /dst'
 else
   echo "== no volume $SRC: empty dashboard"
-  docker run --rm -v "$DATA:/dst" alpine:3.22 chown 10001:10001 /dst
+  docker run --rm -v "$DATA:/dst" alpine:3.24 chown 10001:10001 /dst
 fi
 
 docker run -d --name "$VIEW" --network none -v "$DATA:/data" \

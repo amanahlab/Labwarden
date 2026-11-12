@@ -35,7 +35,7 @@ check_shell() {
   echo "== shell"
   docker run --rm -v "$ROOT:/mnt:ro" -w /mnt koalaman/shellcheck:stable -s sh -S warning \
     agent/labwarden-agent.sh agent/install.sh agent/docker/entrypoint.sh testbed/vm/entrypoint.sh scripts/*.sh
-  for img in alpine:3.22 debian:12-slim; do
+  for img in alpine:3.24 debian:12-slim; do
     docker run --rm -v "$ROOT:/mnt:ro" "$img" sh /mnt/scripts/agent-selftest.sh >/dev/null ||
       { docker run --rm -v "$ROOT:/mnt:ro" "$img" sh /mnt/scripts/agent-selftest.sh | grep -v '^ok'; exit 1; }
   done

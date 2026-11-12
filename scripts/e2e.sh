@@ -203,7 +203,7 @@ echo "== native TLS"
 # A second dashboard on the compose network serves a self-signed certificate.
 # Its Grype DB download is pointed nowhere: this only checks the transport.
 docker volume create "$TLS" >/dev/null
-docker run --rm -v "$TLS:/c" alpine:3.22 sh -c '
+docker run --rm -v "$TLS:/c" alpine:3.24 sh -c '
   apk add --no-cache -q openssl >/dev/null &&
   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj /CN=labwarden-tls \
     -addext subjectAltName=DNS:labwarden-tls -keyout /c/key.pem -out /c/cert.pem 2>/dev/null &&
@@ -215,7 +215,7 @@ docker run -d --name "$TLS" --network labwarden_default --network-alias labwarde
   -e GRYPE_DB_UPDATE_URL=http://127.0.0.1:9/ labwarden:latest >/dev/null || fail "could not start the TLS dashboard"
 wait_for 120 "TLS dashboard health check passes" sh -c \
   '[ "$(docker inspect --format "{{.State.Health.Status}}" '"$TLS"')" = healthy ]'
-docker run --rm -v "$TLS:/c:ro" alpine:3.22 cat /c/cert.pem |
+docker run --rm -v "$TLS:/c:ro" alpine:3.24 cat /c/cert.pem |
   docker compose --profile testbed exec -T testbed-vm sh -c 'cat >/tmp/lw-ca.pem'
 docker compose --profile testbed exec -T testbed-vm curl -fsS -o /dev/null --cacert /tmp/lw-ca.pem https://labwarden-tls:8080/healthz ||
   fail "https with the CA file failed"
