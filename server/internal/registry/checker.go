@@ -40,7 +40,7 @@ type Result struct {
 	NewestInMajor string // newest tag in the running major version, if newer
 	Listed        bool   // the Newest fields are known (the tag list was read, or the tag is no version)
 	Outcome       Outcome
-	Error         string // short, for people; never holds credentials
+	Error         string // short, for people; never holds credentials. Set on OK too when the tag list failed
 }
 
 // DefaultRegistries are queried without further configuration. Image
@@ -167,7 +167,7 @@ func (c *Checker) Check(ctx context.Context, repository string, tags []string) m
 	}
 
 	var list []string
-	listed := false
+	listed, listErr := false, ""
 	if slices.ContainsFunc(tags, Versioned) {
 		cctx, cancel := context.WithTimeout(ctx, c.timeout)
 		list, err = remote.List(repo, append(c.opts, remote.WithContext(cctx))...)
@@ -177,7 +177,12 @@ func (c *Checker) Check(ctx context.Context, repository string, tags []string) m
 				return all(Result{Outcome: o, Error: msg})
 			}
 		}
-		listed = err == nil // else newer tags stay unknown; the digest check still runs
+		// Else newer tags stay unknown and the result says why; the digest
+		// check still runs.
+		if listed = err == nil; !listed {
+			_, msg := classify(err)
+			listErr = "could not list tags: " + msg
+		}
 	}
 	for _, tag := range tags {
 		cctx, cancel := context.WithTimeout(ctx, c.timeout)
@@ -192,6 +197,9 @@ func (c *Checker) Check(ctx context.Context, repository string, tags []string) m
 			continue
 		}
 		r := Result{Digest: desc.Digest.String(), Outcome: OK, Listed: listed || !Versioned(tag)}
+		if !r.Listed {
+			r.Error = listErr
+		}
 		r.Newest, r.NewestInMajor = Newer(tag, list)
 		out[tag] = r
 	}

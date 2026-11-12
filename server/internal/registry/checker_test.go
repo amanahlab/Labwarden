@@ -99,6 +99,30 @@ func TestCheckDigestAndNewerTags(t *testing.T) {
 	}
 }
 
+// The tag list fails but the HEAD works: the digest is kept, and the result
+// says the newer tags are unknown instead of claiming there are none.
+func TestCheckTagListFails(t *testing.T) {
+	host := testRegistry(t, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasSuffix(r.URL.Path, "/tags/list") {
+				http.Error(w, "no", http.StatusBadRequest) // not 5xx: ggcr retries those
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	})
+	running := push(t, host, "team/app", "1.0.0")
+	push(t, host, "team/app", "latest")
+
+	got := checker(t, Options{Registries: []string{host}}).Check(context.Background(), host+"/team/app", []string{"1.0.0", "latest"})
+	if r := got["1.0.0"]; r.Outcome != OK || r.Digest != running || r.Listed || !strings.HasPrefix(r.Error, "could not list tags: ") {
+		t.Errorf("1.0.0: %+v", r)
+	}
+	if r := got["latest"]; r.Outcome != OK || !r.Listed || r.Error != "" { // no versions to compare
+		t.Errorf("latest: %+v", r)
+	}
+}
+
 func TestCheckNotFound(t *testing.T) {
 	host := testRegistry(t, nil)
 	push(t, host, "team/app", "1.0.0")

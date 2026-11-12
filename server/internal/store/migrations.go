@@ -243,4 +243,20 @@ CREATE TABLE image_upstream (
   PRIMARY KEY(repository, tag)
 );
 `,
+	// 7: when the tag list was last read (NULL: newer versions unknown), and
+	// every digest a running tag pointed at upstream, so an update counts
+	// from the first build after the running one, not the latest.
+	`
+ALTER TABLE image_upstream ADD COLUMN listed_at TEXT;
+UPDATE image_upstream SET listed_at = checked_at WHERE digest <> '';
+CREATE TABLE image_upstream_digests (
+  repository TEXT NOT NULL,
+  tag        TEXT NOT NULL,
+  digest     TEXT NOT NULL,
+  first_seen TEXT NOT NULL,
+  PRIMARY KEY(repository, tag, digest)
+) WITHOUT ROWID;
+INSERT INTO image_upstream_digests(repository, tag, digest, first_seen)
+  SELECT repository, tag, digest, COALESCE(digest_since, checked_at) FROM image_upstream WHERE digest <> '';
+`,
 }
