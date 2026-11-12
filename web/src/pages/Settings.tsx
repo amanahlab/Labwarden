@@ -623,8 +623,8 @@ function AddImageForm({ onDone }: { onDone: () => void }) {
             <Input fontFamily="mono" placeholder="nginx:1.25 or ghcr.io/org/app:tag" value={form.ref} onChange={(e) => setForm({ ...form, ref: e.currentTarget.value })} />
             <Field.HelperText>
               Private registries: mount Docker credentials into the dashboard container (see{" "}
-              <CLink href="https://github.com/anchore/grype#private-registry-authentication" target="_blank" rel="noopener noreferrer">
-                Grype registry auth
+              <CLink href="https://github.com/amanahlab/Labwarden/blob/main/docs/setup/server-docker-compose.md#private-registries" target="_blank" rel="noopener noreferrer">
+                Private registries
               </CLink>
               ).
             </Field.HelperText>

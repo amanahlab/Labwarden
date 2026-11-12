@@ -57,6 +57,8 @@ All settings go in `.env`. Apply changes with `docker compose up -d`.
 | `LABWARDEN_NOTIFY_URL` | Webhook for alerts about new critical or known-exploited findings (Slack, Discord, ntfy, …). Webhook URLs often contain a secret, so keep them only in `.env`. |
 | `LABWARDEN_DB_UPDATE_AT`, `TZ` | When the nightly vulnerability database check runs (default `03:00` UTC). |
 | `LABWARDEN_SCAN_WORKERS` | How many matching jobs run at once (default `2`). |
+| `LABWARDEN_IMAGE_CHECK_INTERVAL` | How often the Images page compares running images with their registries (default `24h`). `LABWARDEN_IMAGE_CHECK=false` turns the checks off. |
+| `LABWARDEN_IMAGE_REGISTRIES` | Your own registries the image checks may ask, such as `registry.example.com:5000`. Well-known public registries are allowed already. |
 
 The full list is in the README under **Server configuration**.
 
@@ -92,6 +94,40 @@ If you already have a certificate and key, for example from your own CA or from 
 4. Run `docker compose up -d`. The dashboard is now at `https://labwarden.example.lan:8443`. When you renew the certificate, replace the files: the server picks them up within a minute.
 
 If the certificate comes from your own CA, agents need that CA's certificate. See `LABWARDEN_CA_FILE` in the agent guides.
+
+## Private registries
+
+The Images page asks each image's registry whether a newer build or version exists, and central scans pull images from registries. For a private registry, both need credentials. Give the dashboard a Docker `config.json` that holds them:
+
+1. Create a `registry-auth` folder next to `docker-compose.yml` with a `config.json` in it. Use a read-only (pull) token where the registry has one:
+
+   ```json
+   {
+     "auths": {
+       "registry.example.com:5000": { "username": "reader", "password": "<token>" },
+       "ghcr.io": { "username": "<user>", "password": "<read:packages token>" }
+     }
+   }
+   ```
+
+   Only inline `auths` work. `docker login` on a desktop usually writes `credsStore` or `credHelpers` instead, which point at helper programs the dashboard image does not have, so don't copy that file. The dashboard runs as user 10001, so let it read the file:
+
+   ```bash
+   sudo chown 10001 registry-auth/config.json && sudo chmod 600 registry-auth/config.json
+   ```
+
+2. Mount it in `docker-compose.override.yml`:
+
+   ```yaml
+   services:
+     labwarden:
+       volumes:
+         - ./registry-auth/config.json:/run/secrets/registry/config.json:ro
+   ```
+
+3. Add `DOCKER_CONFIG=/run/secrets/registry` to `.env` and run `docker compose up -d`.
+
+**Settings → System → Image updates** then lists the registry under *With credentials* (the names only; the dashboard never shows or logs the credentials). A registry with credentials is allowed for the image checks without listing it in `LABWARDEN_IMAGE_REGISTRIES`. Keep `registry-auth/` out of git and out of backups that others can read.
 
 ## Updating
 
@@ -135,5 +171,6 @@ Never run `docker compose down -v`: the `-v` deletes the data volume.
 - **Keep the hardening in `docker-compose.yml`**: read-only root filesystem, no Linux capabilities, `no-new-privileges`. Don't remove it in an override file.
 - **Remove the bootstrap token when you don't need it.** Revoke it in **Settings → Enrollment tokens** and delete `LABWARDEN_INGEST_TOKEN` from `.env`. Create short-lived tokens for each round of installs instead.
 - **Watch Logs.** Failed logins and rejected agent requests show up there as warnings.
+- **Give registry credentials read access only**, and keep `registry-auth/config.json` readable by the dashboard alone (see Private registries).
 - **Back up regularly and keep backups private.**
 - **Update regularly**, so you get security fixes and current scanners.
