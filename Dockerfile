@@ -16,7 +16,7 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/ ./
 # release.yml passes the agent image it just published (tag@index digest), so the
-# Settings snippets of a release name its own agent. Empty: the pin in Settings.tsx.
+# agent snippets of a release name its own agent. Empty: the pin in web/src/lib/agent.ts.
 ARG AGENT_IMAGE=
 RUN case "$AGENT_IMAGE" in \
       ""|ghcr.io/amanahlab/labwarden-agent:*@sha256:*) ;; \

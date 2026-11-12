@@ -17,11 +17,13 @@ import {
   LuShieldAlert,
 } from "react-icons/lu"
 import { BrandLockup, BrandMark } from "@/components/Brand"
+import { AddHostSheet } from "@/components/AddHostSheet"
 import { ScannerStatus } from "@/components/ScannerStatus"
 import { ColorModeButton } from "@/components/ui/color-mode"
 import { Tooltip } from "@/components/ui/tooltip"
 import { api, type Me, type Summary } from "@/lib/api"
 import { num } from "@/lib/format"
+import { useSheet } from "@/lib/useSheet"
 
 type NavEntry = { to: string; label: string; icon: typeof LuGauge; end?: boolean }
 
@@ -103,6 +105,7 @@ function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed?: boolean; onT
   const qc = useQueryClient()
   const me = qc.getQueryData<Me>(["me"])
   const summary = useQuery({ queryKey: ["summary"], queryFn: () => api.get<Summary>("/summary") })
+  const addHost = useSheet("add-host")
   const s = summary.data
   const badges: Record<string, ReactNode> = {
     "/vulnerabilities": s?.unique.critical ? (
@@ -140,17 +143,20 @@ function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed?: boolean; onT
 
       {collapsed ? (
         <Tooltip content="Add host" positioning={{ placement: "right" }}>
-          <IconButton asChild size="sm" aria-label="Add host" w="full">
-            <Link to="/settings">
-              <LuPlus />
-            </Link>
+          <IconButton size="sm" aria-label="Add host" w="full" onClick={addHost.show}>
+            <LuPlus />
           </IconButton>
         </Tooltip>
       ) : (
-        <Button asChild size="sm" w="full">
-          <Link to="/settings" onClick={onNavigate}>
-            <LuPlus /> Add host
-          </Link>
+        <Button
+          size="sm"
+          w="full"
+          onClick={() => {
+            onNavigate?.()
+            addHost.show()
+          }}
+        >
+          <LuPlus /> Add host
         </Button>
       )}
 
@@ -292,6 +298,7 @@ export function Layout() {
           </Box>
         </Box>
       </Flex>
+      <AddHostSheet />
     </Flex>
   )
 }

@@ -9,6 +9,7 @@ import { ErrorBox, Header, KevBadge, KevMark, Panel, SegmentBar, SeverityBadge, 
 import { RankedBars, SeverityDonut, SeverityTrend } from "@/components/charts"
 import { FIX_OPTIONS } from "@/lib/options"
 import { useParamsState } from "@/lib/useParamsState"
+import { useSheet } from "@/lib/useSheet"
 
 const plural = (n: number, one: string, many: string) => `${num(n)} ${n === 1 ? one : many}`
 
@@ -133,6 +134,7 @@ export function OverviewPage() {
   const days = ps.get("days")
   const summary = useQuery({ queryKey: ["summary"], queryFn: () => api.get<Summary>("/summary"), refetchInterval: 60_000 })
   const trends = useQuery({ queryKey: ["trends", days], queryFn: () => api.get<DailyStat[]>("/trends", { days }) })
+  const addHost = useSheet("add-host")
   const s = summary.data
 
   if (summary.error) return <ErrorBox error={summary.error} />
@@ -158,10 +160,8 @@ export function OverviewPage() {
             title="No hosts have reported yet"
             description="Install the agent on a VM or Docker host, or add a registry image to scan centrally."
             action={
-              <Button asChild size="sm">
-                <Link to="/settings">
-                  Set up an agent <LuArrowRight />
-                </Link>
+              <Button size="sm" onClick={addHost.show}>
+                Add a host <LuArrowRight />
               </Button>
             }
           />

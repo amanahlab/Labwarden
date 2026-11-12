@@ -6,7 +6,7 @@ name: release
 # purpose, and re-dispatching an older tag moves `latest` back to it.
 #
 # The agent is published first, and the dashboard build embeds that agent's
-# tag@index digest in its Settings snippets, so each release shows its own agent.
+# tag@index digest in its agent snippets, so each release shows its own agent.
 #
 # After each release, a follow-up PR pins the new tag and its multi-arch INDEX
 # digest wherever the old one appears (git grep -n 'ghcr.io/amanahlab/labwarden'),

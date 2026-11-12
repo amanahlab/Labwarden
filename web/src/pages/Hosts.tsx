@@ -165,7 +165,7 @@ function HostTable({ ps, hosts, loading, compact }: { ps: PS; hosts?: HostRow[];
         {hosts && hosts.length === 0 && (
           <Table.Row>
             <Table.Cell colSpan={9}>
-              <Empty icon={<LuServer />} title="No hosts match" description="Install an agent from Settings, or loosen the filters." />
+              <Empty icon={<LuServer />} title="No hosts match" description="Add a host from the sidebar, or loosen the filters." />
             </Table.Cell>
           </Table.Row>
         )}

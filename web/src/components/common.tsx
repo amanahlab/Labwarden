@@ -6,6 +6,7 @@ import {
   Box,
   ButtonGroup,
   Card,
+  Clipboard,
   EmptyState,
   Flex,
   HStack,
@@ -532,5 +533,41 @@ export function DataTable({ children, minW = "4xl", size = "sm" }: { children: R
         {children}
       </Table.Root>
     </Table.ScrollArea>
+  )
+}
+
+// Something to paste into a terminal or a file, with a copy button. Dark in
+// both colour modes, like a terminal.
+export function CodeBlock({ code }: { code: string }) {
+  return (
+    <Box position="relative" bg="gray.900" color="gray.100" rounded="l2" p="4" pe="12" overflowX="auto">
+      <Text as="pre" fontFamily="mono" textStyle="xs" whiteSpace="pre">
+        {code}
+      </Text>
+      <Clipboard.Root value={code} position="absolute" top="2" right="2">
+        <Clipboard.Trigger asChild>
+          <IconButton size="xs" variant="ghost" color="gray.300" _hover={{ bg: "gray.700" }} aria-label="Copy">
+            <Clipboard.Indicator />
+          </IconButton>
+        </Clipboard.Trigger>
+      </Clipboard.Root>
+    </Box>
+  )
+}
+
+// One numbered step of a written procedure.
+export function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <HStack align="start" gap="3">
+      <Badge variant="solid" rounded="full" size="sm" mt="0.5">
+        {n}
+      </Badge>
+      <Stack gap="2" flex="1" minW="0">
+        <Text fontWeight="medium" textStyle="sm">
+          {title}
+        </Text>
+        {children}
+      </Stack>
+    </HStack>
   )
 }

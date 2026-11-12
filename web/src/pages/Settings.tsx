@@ -1,9 +1,8 @@
-import { useState, type ReactNode } from "react"
+import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Alert,
   Badge,
-  Box,
   Button,
   Clipboard,
   CloseButton,
@@ -23,10 +22,13 @@ import {
   Tabs,
   Text,
 } from "@chakra-ui/react"
-import { LuBell, LuDownload, LuKeyRound, LuLogOut, LuPlay, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu"
+import { LuBell, LuCloud, LuDownload, LuKeyRound, LuLogOut, LuPlay, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu"
 import { api, type AgentCredential, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
 import { ago, dateTime } from "@/lib/format"
-import { DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel, Select } from "@/components/common"
+import { agentSnippets, TTL_OPTIONS } from "@/lib/agent"
+import { useSheet } from "@/lib/useSheet"
+import { CodeBlock, DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel, Select, Step } from "@/components/common"
+import { Sheet, SheetBody, SheetFooter } from "@/components/Sheet"
 import { toaster } from "@/components/ui/toaster"
 import { Tooltip } from "@/components/ui/tooltip"
 
@@ -35,11 +37,6 @@ const onError = (title: string) => (e: unknown) => toaster.create({ type: "error
 // Plain http to anything but this machine: passwords, enrollment tokens and
 // host credentials cross the network readable by anyone on the path.
 const plainHTTP = window.location.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(window.location.hostname)
-
-// A release build embeds the agent image published with it (release.yml passes
-// AGENT_IMAGE to the Dockerfile). Other builds use this pin of the latest
-// release: tag + multi-arch index digest (docker buildx imagetools inspect).
-const agentImage = import.meta.env.VITE_AGENT_IMAGE || "ghcr.io/amanahlab/labwarden-agent:0.1.3@sha256:3dbf72645808017245536ca81db26f321b22e8e262ca7bb9dc555c5fe04dc4fa"
 
 export function SettingsPage() {
   return (
@@ -72,83 +69,20 @@ export function SettingsPage() {
   )
 }
 
-function CodeBlock({ code }: { code: string }) {
-  return (
-    <Box position="relative" bg={{ _light: "gray.900", _dark: "gray.900" }} color="gray.100" rounded="md" p="4" pe="12" overflowX="auto">
-      <Text as="pre" fontFamily="mono" textStyle="xs" whiteSpace="pre">
-        {code}
-      </Text>
-      <Clipboard.Root value={code} position="absolute" top="2" right="2">
-        <Clipboard.Trigger asChild>
-          <IconButton size="xs" variant="ghost" color="gray.300" _hover={{ bg: "gray.700" }} aria-label="Copy">
-            <Clipboard.Indicator />
-          </IconButton>
-        </Clipboard.Trigger>
-      </Clipboard.Root>
-    </Box>
-  )
-}
-
-function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
-  return (
-    <HStack align="start" gap="3">
-      <Badge variant="solid" rounded="full" size="sm" mt="0.5">
-        {n}
-      </Badge>
-      <Stack gap="2" flex="1" minW="0">
-        <Text fontWeight="medium" textStyle="sm">
-          {title}
-        </Text>
-        {children}
-      </Stack>
-    </HStack>
-  )
-}
-
 function AgentSetup() {
-  const url = window.location.origin
   const sys = useQuery({ queryKey: ["system"], queryFn: () => api.get<SystemInfo>("/system") })
-  const vm = `curl -fsSL -o lw-install.sh ${url}/install.sh
-echo "${sys.data?.install_sha256 || "<sha256>"}  lw-install.sh" | sha256sum -c
-sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=<token> LABWARDEN_GROUP=homelab sh lw-install.sh`
-  const docker = `docker run -d --name labwarden-agent --restart unless-stopped \\
-  --read-only --tmpfs /tmp --cap-drop ALL --cap-add DAC_OVERRIDE \\
-  --security-opt no-new-privileges:true \\
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \\
-  -v labwarden-agent-db:/var/lib/labwarden \\
-  -e LABWARDEN_URL=${url} -e LABWARDEN_TOKEN=<token> \\
-  -e LABWARDEN_HOST=$(hostname) -e LABWARDEN_GROUP=homelab \\
-  ${agentImage}`
-  const compose = `services:
-  # Read-only Docker API: the agent never holds the socket itself.
-  docker-proxy:
-    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
-    restart: unless-stopped
-    environment: { CONTAINERS: "1", IMAGES: "1", POST: "0" }
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-  labwarden-agent:
-    image: ${agentImage}
-    restart: unless-stopped
-    depends_on: [docker-proxy]
-    read_only: true
-    tmpfs: [/tmp]
-    cap_drop: [ALL]
-    cap_add: [DAC_OVERRIDE]         # unpack container filesystems
-    security_opt: [no-new-privileges:true]
-    environment:
-      LABWARDEN_URL: ${url}
-      LABWARDEN_TOKEN: <token>
-      LABWARDEN_HOST: <host-name>      # name shown in the dashboard
-      LABWARDEN_GROUP: homelab
-      LABWARDEN_INTERVAL: "21600"    # seconds between scans
-      LABWARDEN_DOCKER_URL: tcp://docker-proxy:2375
-    volumes:
-      - labwarden-agent-db:/var/lib/labwarden
-volumes:
-  labwarden-agent-db: {}`
+  const addHost = useSheet("add-host")
+  const { vm, docker, compose } = agentSnippets({ sha256: sys.data?.install_sha256 })
   return (
-    <Panel title="Connect a host" subtitle="The agent catalogs packages with Syft and pushes compressed SBOMs, run status and logs to this dashboard, which matches them against its vulnerability DB.">
+    <Panel
+      title="Connect a host"
+      subtitle="The agent catalogs packages with Syft and pushes compressed SBOMs, run status and logs to this dashboard, which matches them against its vulnerability DB."
+      actions={
+        <Button size="sm" flexShrink={0} onClick={addHost.show}>
+          <LuPlus /> Add host
+        </Button>
+      }
+    >
       <Tabs.Root defaultValue="vm" variant="enclosed" size="sm">
         <Tabs.List>
           <Tabs.Trigger value="vm">Linux VM</Tabs.Trigger>
@@ -221,13 +155,6 @@ volumes:
     </Panel>
   )
 }
-
-const TTL_OPTIONS: [string, string][] = [
-  ["1", "Expires in 1 hour"],
-  ["24", "Expires in 24 hours"],
-  ["168", "Expires in 7 days"],
-  ["0", "Never expires"],
-]
 
 function tokenState(t: Token): { label: string; palette: string } {
   if (t.revoked_at) return { label: "revoked", palette: "red" }
@@ -634,20 +561,75 @@ function SystemPanel() {
   )
 }
 
-function CentralTargets() {
+function AddImageForm({ onDone }: { onDone: () => void }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({ ref: "", host_name: "registry", group: "images", interval_min: 1440 })
-  const list = useQuery({ queryKey: ["central"], queryFn: () => api.get<CentralTarget[]>("/central-targets"), refetchInterval: 15_000 })
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["central"] })
   const add = useMutation({
     mutationFn: () => api.post("/central-targets", { ...form, ref: form.ref.trim(), interval_min: Number(form.interval_min) }),
     onSuccess: () => {
       toaster.create({ type: "success", title: "Image added; first scan queued" })
-      setForm((f) => ({ ...f, ref: "" }))
-      invalidate()
+      qc.invalidateQueries({ queryKey: ["central"] })
+      onDone()
     },
     onError: onError("Could not add image"),
   })
+  const every = form.interval_min >= 60 && form.interval_min % 60 === 0 ? `${form.interval_min / 60} h` : `${form.interval_min} min`
+  return (
+    <>
+      <SheetBody>
+        <Stack
+          as="form"
+          id="add-image"
+          gap="4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (form.ref.trim()) add.mutate()
+          }}
+        >
+          <Field.Root required>
+            <Field.Label>Image reference</Field.Label>
+            <Input fontFamily="mono" placeholder="nginx:1.25 or ghcr.io/org/app:tag" value={form.ref} onChange={(e) => setForm({ ...form, ref: e.currentTarget.value })} />
+            <Field.HelperText>
+              Private registries: mount Docker credentials into the dashboard container (see{" "}
+              <CLink href="https://github.com/anchore/grype#private-registry-authentication" target="_blank" rel="noopener noreferrer">
+                Grype registry auth
+              </CLink>
+              ).
+            </Field.HelperText>
+          </Field.Root>
+          <Field.Root>
+            <Field.Label>Shown under host</Field.Label>
+            <Input value={form.host_name} onChange={(e) => setForm({ ...form, host_name: e.currentTarget.value })} />
+            <Field.HelperText>Images with the same host name are listed together on the Hosts page.</Field.HelperText>
+          </Field.Root>
+          <Field.Root>
+            <Field.Label>Group</Field.Label>
+            <Input value={form.group} onChange={(e) => setForm({ ...form, group: e.currentTarget.value })} />
+          </Field.Root>
+          <Field.Root>
+            <Field.Label>Scan every (minutes)</Field.Label>
+            <Input type="number" min={15} value={form.interval_min} onChange={(e) => setForm({ ...form, interval_min: Number(e.currentTarget.value) })} />
+            <Field.HelperText>1440 is once a day. The first scan is queued right away.</Field.HelperText>
+          </Field.Root>
+        </Stack>
+      </SheetBody>
+      <SheetFooter summary={<Text truncate>{form.ref.trim() ? `${form.ref.trim()} · every ${every}` : "No image yet"}</Text>}>
+        <Button size="sm" variant="outline" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button size="sm" type="submit" form="add-image" loading={add.isPending} disabled={!form.ref.trim()}>
+          <LuPlus /> Add image
+        </Button>
+      </SheetFooter>
+    </>
+  )
+}
+
+function CentralTargets() {
+  const qc = useQueryClient()
+  const sheet = useSheet("add-image")
+  const list = useQuery({ queryKey: ["central"], queryFn: () => api.get<CentralTarget[]>("/central-targets"), refetchInterval: 15_000 })
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["central"] })
   const toggle = useMutation({
     mutationFn: (t: CentralTarget) => api.patch(`/central-targets/${t.id}`, { enabled: !t.enabled }),
     onSuccess: invalidate,
@@ -664,39 +646,21 @@ function CentralTargets() {
   const del = useMutation({ mutationFn: (id: number) => api.del(`/central-targets/${id}`), onSuccess: invalidate, onError: onError("Delete failed") })
 
   return (
-    <Panel title="Central registry scans" subtitle="Images the dashboard pulls from a registry and scans on a schedule. No agent needed.">
+    <Panel
+      title="Central registry scans"
+      subtitle="Images the dashboard pulls from a registry and scans on a schedule. No agent needed."
+      actions={
+        <Button size="sm" variant="outline" flexShrink={0} onClick={sheet.show}>
+          <LuPlus /> Add image
+        </Button>
+      }
+    >
+      <Sheet open={sheet.open} onClose={sheet.hide} title="Add a registry image" description="The dashboard pulls the image itself and scans it on a schedule. No agent needed.">
+        <AddImageForm onDone={sheet.hide} />
+      </Sheet>
       <Stack gap="4">
-        <HStack
-          as="form"
-          gap="2"
-          align="end"
-          wrap="wrap"
-          onSubmit={(e) => {
-            e.preventDefault()
-            add.mutate()
-          }}
-        >
-          <Field.Root flex="2" minW="64">
-            <Field.Label textStyle="xs">Image reference</Field.Label>
-            <Input size="sm" placeholder="nginx:1.25 or ghcr.io/org/app:tag" value={form.ref} onChange={(e) => setForm({ ...form, ref: e.currentTarget.value })} />
-          </Field.Root>
-          <Field.Root flex="1" minW="32">
-            <Field.Label textStyle="xs">Shown under host</Field.Label>
-            <Input size="sm" value={form.host_name} onChange={(e) => setForm({ ...form, host_name: e.currentTarget.value })} />
-          </Field.Root>
-          <Field.Root flex="1" minW="28">
-            <Field.Label textStyle="xs">Group</Field.Label>
-            <Input size="sm" value={form.group} onChange={(e) => setForm({ ...form, group: e.currentTarget.value })} />
-          </Field.Root>
-          <Field.Root w="28">
-            <Field.Label textStyle="xs">Every (min)</Field.Label>
-            <Input size="sm" type="number" min={15} value={form.interval_min} onChange={(e) => setForm({ ...form, interval_min: Number(e.currentTarget.value) })} />
-          </Field.Root>
-          <Button size="sm" type="submit" loading={add.isPending} disabled={!form.ref.trim()}>
-            <LuPlus /> Add image
-          </Button>
-        </HStack>
         {list.error && <ErrorBox error={list.error} />}
+        {list.data && list.data.length === 0 && <Empty icon={<LuCloud />} title="No registry images" description="Add one to scan an image that runs on no host with an agent." />}
         {list.data && list.data.length > 0 && (
           <DataTable minW="4xl">
             <Table.Header>
@@ -750,13 +714,6 @@ function CentralTargets() {
             </Table.Body>
           </DataTable>
         )}
-        <Text textStyle="xs" color="fg.muted">
-          Private registries: mount Docker credentials into the dashboard container (see{" "}
-          <CLink href="https://github.com/anchore/grype#private-registry-authentication" target="_blank" rel="noopener noreferrer">
-            Grype registry auth
-          </CLink>
-          ).
-        </Text>
       </Stack>
     </Panel>
   )
