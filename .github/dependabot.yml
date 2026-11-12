@@ -1,0 +1,68 @@
+# Weekly version-update PRs, grouped per ecosystem. Nothing merges on its own:
+# every PR is reviewed and must pass ci.yml like any other.
+#
+# Directories are listed one by one so testbed/ is never included: its pins are
+# deliberately vulnerable (rule 5). Not covered, by design, and bumped by hand:
+# Grype and Syft (ARG-driven FROM lines, bumped together), the Syft sums in
+# agent/install.sh, govulncheck in scripts/test.sh, the tag-only helper images
+# in scripts/, our own ghcr.io/amanahlab images (the post-release pin PR) and
+# the agent snippets in web/src/lib/agent.ts.
+#
+# A golang bump in the Dockerfile also needs the same ref in scripts/go.sh;
+# ci.yml fails until both match.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directories: [/, /agent]
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    groups:
+      base-images:
+        patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    ignore:
+      # Pinned by the post-release PR, together with the README and docs.
+      - dependency-name: "ghcr.io/amanahlab/*"
+      # Built locally by docker-compose.dev.yml, not pulled.
+      - dependency-name: "labwarden*"
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    groups:
+      go-modules:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: chore
+    groups:
+      web:
+        patterns: ["*"]
+        update-types: [minor, patch]
