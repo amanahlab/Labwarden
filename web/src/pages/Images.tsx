@@ -42,7 +42,9 @@ export function ImagesPage() {
   })
   const checking = (system.data?.queue.image_checks ?? 0) > 0
   const images = useQuery({
-    queryKey: ["images", params],
+    // checking is in the key so the list is fetched once more when the last
+    // check finishes, not left at the poll before it.
+    queryKey: ["images", params, checking],
     queryFn: () => api.get<List<ImageRow>>("/images", params),
     placeholderData: keepPreviousData,
     // While checks run, their results arrive repository by repository.
