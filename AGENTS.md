@@ -33,6 +33,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 | End-user Compose file: published dashboard image, hardening | `docker-compose.yml` |
 | Development override: source build and testbed, loaded through `COMPOSE_FILE` | `docker-compose.dev.yml` |
 | Security model, how to report a vulnerability | `README.md` (Security model), `docs/security-architecture.md` (for users), `SECURITY.md` |
+| Weekly Grype scan of the published images (pinned Grype from the Dockerfile) into the Security tab | `.github/workflows/image-scan.yml` |
 | Setup guides for users (Compose, agents, Caddy, nginx) | `docs/setup/` |
 | Logo masters, guidelines, generator scripts (dashboard copies in `web/public/` and `web/src/assets/brand/`) | `docs/brand/` |
 | Release: multi-arch (amd64 + arm64) images to GHCR on version tags | `.github/workflows/release.yml` |

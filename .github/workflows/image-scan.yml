@@ -1,0 +1,43 @@
+name: image-scan
+
+# Scans the published images (the newest release, :latest) with the Grype the
+# dashboard itself ships, pinned in the Dockerfile, so there is no second pin to
+# drift. Only vulnerabilities with a fix are reported. Results go to the
+# Security tab (code scanning); findings never fail the run. A finding in the
+# bundled grype or syft binaries is the signal for a deliberate Grype/Syft bump.
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [labwarden, labwarden-agent]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The packages are public: no registry login.
+      - env:
+          IMAGE: ghcr.io/amanahlab/${{ matrix.image }}:latest
+        run: |
+          version=$(sed -n 's/^ARG GRYPE_VERSION=//p' Dockerfile)
+          digest=$(sed -n 's/^ARG GRYPE_DIGEST=//p' Dockerfile)
+          if [ -z "$version" ] || [ -z "$digest" ]; then
+            echo "::error::GRYPE_VERSION or GRYPE_DIGEST not found in the Dockerfile"
+            exit 1
+          fi
+          docker run --rm "anchore/grype:$version@$digest" "registry:$IMAGE" \
+            --only-fixed -o sarif > grype.sarif
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          sarif_file: grype.sarif
+          category: image-${{ matrix.image }}
