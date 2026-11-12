@@ -36,7 +36,6 @@ export function LogsPage() {
   return (
     <>
       <PageHeader
-        title="Logs"
         description="Agent runs, ingest results, central scans, triage changes and authentication events."
         actions={
           <Switch.Root size="sm" checked={live} onCheckedChange={(e) => ps.set({ live: e.checked ? "1" : "0", page: ps.page })}>

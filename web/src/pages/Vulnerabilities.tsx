@@ -1,6 +1,6 @@
 import { Link } from "react-router"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import { Badge, Button, HStack, IconButton, Link as CLink, SegmentGroup, Stack, Table, Text } from "@chakra-ui/react"
+import { Badge, Button, HStack, IconButton, Link as CLink, Stack, Table, Text } from "@chakra-ui/react"
 import { LuDownload, LuServer, LuShieldCheck } from "react-icons/lu"
 import { api, qs, type FindingRow, type GroupRow, type HostVulnRow, type List, type LocationRow, type Summary, type VulnRow } from "@/lib/api"
 import { ago, num, pct, splitList } from "@/lib/format"
@@ -22,7 +22,9 @@ import {
   SeverityBadge,
   SeverityCounts,
   SortHeader,
+  Toolbar,
   TriageBadge,
+  ViewTabs,
 } from "@/components/common"
 import { ClearFilters, KevToggle, SeverityChips } from "@/components/filters"
 import { KindTag } from "@/components/KindTag"
@@ -80,7 +82,6 @@ export function VulnerabilitiesPage() {
   return (
     <>
       <PageHeader
-        title="Vulnerabilities"
         description="Every vulnerability Grype reported in the latest scan of each target."
         actions={
           <Button asChild size="sm" variant="outline" bg="surface">
@@ -91,48 +92,50 @@ export function VulnerabilitiesPage() {
         }
       />
 
-      <Stack gap="3" mb="4">
-        <HStack gap="2" wrap="wrap">
-          <SegmentGroup.Root size="sm" value={view} onValueChange={(e) => ps.set({ view: e.value, sort: null, order: null })} bg="surface">
-            <SegmentGroup.Indicator />
-            <SegmentGroup.Items
-              items={[
-                { value: "vulns", label: "By vulnerability" },
-                { value: "findings", label: "By package instance" },
-                { value: "hosts", label: "By host" },
-                { value: "locations", label: "By location" },
-              ]}
-            />
-          </SegmentGroup.Root>
-          <SearchInput value={filters.q} onChange={(v) => ps.set({ q: v })} placeholder="CVE / GHSA, package, host, description…" w={{ base: "full", md: "96" }} />
-        </HStack>
-        <FilterBar>
-          <SeverityChips value={filters.severity} onChange={(v) => ps.set({ severity: v })} />
-          <KevToggle value={filters.kev} onChange={(v) => ps.set({ kev: v ? "true" : null })} />
-          <Select label="Fix state" value={filters.fix} onChange={(v) => ps.set({ fix: v })} options={FIX_OPTIONS} placeholder="Any fix state" w="36" />
-          <Select label="Triage status" value={filters.status} onChange={(v) => ps.set({ status: v })} options={STATUS_OPTIONS} w="52" />
-          <Select label="Group" value={filters.group} onChange={(v) => ps.set({ group: v })} options={(groups.data ?? []).map((g) => g.name)} placeholder="All groups" w="36" />
-          <Select
-            label="Ecosystem"
-            value={filters.pkg_type}
-            onChange={(v) => ps.set({ pkg_type: v })}
-            options={(summary.data?.by_pkg_type ?? []).map((t) => t.name)}
-            placeholder="All ecosystems"
-            w="36"
+      <Toolbar
+        views={
+          <ViewTabs
+            label="View"
+            value={view}
+            onChange={(v) => ps.set({ view: v, sort: null, order: null })}
+            // The summary counts open and acknowledged findings: the default of this list.
+            items={[
+              { value: "vulns", label: "By vulnerability", count: summary.data?.unique.total },
+              { value: "findings", label: "By package instance", count: summary.data?.findings.total },
+              { value: "hosts", label: "By host" },
+              { value: "locations", label: "By location" },
+            ]}
           />
-          {filters.host_id && (
-            <Button size="xs" variant="subtle" onClick={() => ps.set({ host_id: null })}>
-              Host #{filters.host_id} ✕
-            </Button>
-          )}
-          {(filters.location || filters.target_id) && (
-            <Button size="xs" variant="subtle" maxW="sm" title={filters.location} onClick={() => ps.set({ location: null, target_id: null })}>
-              <Text truncate>{filters.location ? `Path ${filters.location}` : `Target #${filters.target_id}`}</Text> ✕
-            </Button>
-          )}
-          <ClearFilters show={hasFilters} onClear={() => ps.set(Object.fromEntries(FILTER_KEYS.map((k) => [k, null])))} />
-        </FilterBar>
-      </Stack>
+        }
+      >
+        <SearchInput value={filters.q} onChange={(v) => ps.set({ q: v })} placeholder="CVE / GHSA, package, host, description…" w={{ base: "full", md: "96" }} />
+      </Toolbar>
+      <FilterBar>
+        <KevToggle value={filters.kev} onChange={(v) => ps.set({ kev: v ? "true" : null })} />
+        <SeverityChips value={filters.severity} onChange={(v) => ps.set({ severity: v })} />
+        <Select label="Fix state" value={filters.fix} onChange={(v) => ps.set({ fix: v })} options={FIX_OPTIONS} placeholder="Any fix state" w="36" />
+        <Select label="Triage status" value={filters.status} onChange={(v) => ps.set({ status: v })} options={STATUS_OPTIONS} w="52" />
+        <Select label="Group" value={filters.group} onChange={(v) => ps.set({ group: v })} options={(groups.data ?? []).map((g) => g.name)} placeholder="All groups" w="36" />
+        <Select
+          label="Ecosystem"
+          value={filters.pkg_type}
+          onChange={(v) => ps.set({ pkg_type: v })}
+          options={(summary.data?.by_pkg_type ?? []).map((t) => t.name)}
+          placeholder="All ecosystems"
+          w="36"
+        />
+        {filters.host_id && (
+          <Button size="xs" variant="subtle" onClick={() => ps.set({ host_id: null })}>
+            Host #{filters.host_id} ✕
+          </Button>
+        )}
+        {(filters.location || filters.target_id) && (
+          <Button size="xs" variant="subtle" maxW="sm" title={filters.location} onClick={() => ps.set({ location: null, target_id: null })}>
+            <Text truncate>{filters.location ? `Path ${filters.location}` : `Target #${filters.target_id}`}</Text> ✕
+          </Button>
+        )}
+        <ClearFilters show={hasFilters} onClear={() => ps.set(Object.fromEntries(FILTER_KEYS.map((k) => [k, null])))} />
+      </FilterBar>
 
       {q.error && <ErrorBox error={q.error} />}
       {view === "findings" ? (

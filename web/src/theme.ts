@@ -1,4 +1,5 @@
-import { createSystem, defaultConfig, defineConfig, defineRecipe } from "@chakra-ui/react"
+import { createSystem, defaultConfig, defineConfig, defineRecipe, defineSlotRecipe } from "@chakra-ui/react"
+import { tableAnatomy } from "@chakra-ui/react/anatomy"
 
 // Brand palette (docs/brand/GUIDELINES.md). Signal is reserved for the alert
 // light: the logo's diamond and the KEV marker. Never use it as a UI accent.
@@ -44,6 +45,25 @@ const config = defineConfig({
       // Links keep blue so they still read as links next to the neutral accent.
       link: defineRecipe({ base: { colorPalette: "blue" } }),
     },
+    slotRecipes: {
+      // Quiet tables: small uppercase headers, rows on whatever they sit on
+      // (the sheet or a card). "sm" is the dense size for findings, scans and
+      // logs; "md" is the comfortable one for short lists.
+      table: defineSlotRecipe({
+        slots: tableAnatomy.keys(),
+        base: {
+          columnHeader: { textStyle: "xs", fontWeight: "medium", textTransform: "uppercase", letterSpacing: "wider", color: "fg.muted", whiteSpace: "nowrap" },
+        },
+        variants: {
+          variant: { line: { row: { bg: "transparent" } } },
+          stickyHeader: { true: { header: { "& :where(tr)": { bg: "surface" } } } },
+          size: {
+            sm: { columnHeader: { py: "2.5" }, cell: { py: "2.5" } },
+            md: { columnHeader: { px: "4", py: "3" }, cell: { px: "4", py: "3.5" } },
+          },
+        },
+      }),
+    },
     tokens: {
       colors: {
         brand: Object.fromEntries(Object.entries(BRAND).map(([k, v]) => [k, { value: v }])),
@@ -62,11 +82,32 @@ const config = defineConfig({
         series: Object.fromEntries(
           SERIES.map(([light, dark], i) => [String(i + 1), { value: { _light: light, _dark: dark } }]),
         ),
-        // Page background behind cards: Paper in light mode.
-        canvas: { value: { _light: "{colors.brand.paper}", _dark: "{colors.gray.950}" } },
-        // Cards, sidebar and header: white, or Ink in dark mode (the reversed logo's ground).
+        // The ground under the sidebar, the top bar and the content sheet:
+        // Paper, or a shade below Ink in dark mode so the sheet still reads.
+        canvas: { value: { _light: "{colors.brand.paper}", _dark: "#0A0C0F" } },
+        // The content sheet, cards and overlays: white, or Ink in dark mode.
         surface: { value: { _light: "white", _dark: "{colors.brand.ink}" } },
+        bg: { panel: { value: { _light: "white", _dark: "{colors.brand.ink}" } } },
         fg: { muted: { value: { _light: "{colors.brand.slate}", _dark: "{colors.gray.400}" } } },
+        // Primary buttons and other solid neutrals are Ink, not Chakra's gray.900.
+        gray: { solid: { value: { _light: "{colors.brand.ink}", _dark: "{colors.white}" } } },
+      },
+      // Softer corners than Chakra's defaults: controls 8 px, cards 12 px,
+      // the content sheet and side sheets 16 px.
+      radii: {
+        l1: { value: "{radii.sm}" },
+        l2: { value: "{radii.lg}" },
+        l3: { value: "{radii.xl}" },
+        sheet: { value: "{radii.2xl}" },
+      },
+      // Shadows are for things that float (side sheets). Cards stay flat.
+      shadows: {
+        overlay: {
+          value: {
+            _light: "0 24px 48px -12px {colors.gray.900/20}, 0 0 1px {colors.gray.900/30}",
+            _dark: "0 24px 48px -12px {black/70}, 0 0 1px inset {colors.gray.300/30}",
+          },
+        },
       },
     },
   },

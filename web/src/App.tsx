@@ -14,6 +14,7 @@ const Loading = () => (
 )
 
 // Each page is its own chunk; the router loads it on first navigation.
+// handle.title is the section name the layout shows in the top bar.
 const router = createBrowserRouter([
   {
     path: "/",
@@ -24,15 +25,15 @@ const router = createBrowserRouter([
         // Pathless wrapper: page errors render inside the layout.
         errorElement: <RouteError />,
         children: [
-      { index: true, lazy: async () => ({ Component: (await import("@/pages/Overview")).OverviewPage }) },
-      { path: "vulnerabilities", lazy: async () => ({ Component: (await import("@/pages/Vulnerabilities")).VulnerabilitiesPage }) },
-      { path: "vulnerabilities/:id", lazy: async () => ({ Component: (await import("@/pages/VulnDetail")).VulnDetailPage }) },
-      { path: "hosts", lazy: async () => ({ Component: (await import("@/pages/Hosts")).HostsPage }) },
-      { path: "hosts/:id", lazy: async () => ({ Component: (await import("@/pages/HostDetail")).HostDetailPage }) },
-      { path: "scans", lazy: async () => ({ Component: (await import("@/pages/Scans")).ScansPage }) },
-      { path: "logs", lazy: async () => ({ Component: (await import("@/pages/Logs")).LogsPage }) },
-      { path: "settings", lazy: async () => ({ Component: (await import("@/pages/Settings")).SettingsPage }) },
-      { path: "*", lazy: async () => ({ Component: (await import("@/pages/NotFound")).NotFoundPage }) },
+      { index: true, handle: { title: "Overview" }, lazy: async () => ({ Component: (await import("@/pages/Overview")).OverviewPage }) },
+      { path: "vulnerabilities", handle: { title: "Vulnerabilities" }, lazy: async () => ({ Component: (await import("@/pages/Vulnerabilities")).VulnerabilitiesPage }) },
+      { path: "vulnerabilities/:id", handle: { title: "Vulnerabilities" }, lazy: async () => ({ Component: (await import("@/pages/VulnDetail")).VulnDetailPage }) },
+      { path: "hosts", handle: { title: "Hosts" }, lazy: async () => ({ Component: (await import("@/pages/Hosts")).HostsPage }) },
+      { path: "hosts/:id", handle: { title: "Hosts" }, lazy: async () => ({ Component: (await import("@/pages/HostDetail")).HostDetailPage }) },
+      { path: "scans", handle: { title: "Scans" }, lazy: async () => ({ Component: (await import("@/pages/Scans")).ScansPage }) },
+      { path: "logs", handle: { title: "Logs" }, lazy: async () => ({ Component: (await import("@/pages/Logs")).LogsPage }) },
+      { path: "settings", handle: { title: "Settings" }, lazy: async () => ({ Component: (await import("@/pages/Settings")).SettingsPage }) },
+      { path: "*", handle: { title: "Not found" }, lazy: async () => ({ Component: (await import("@/pages/NotFound")).NotFoundPage }) },
         ],
       },
     ],

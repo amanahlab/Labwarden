@@ -21,3 +21,6 @@ data/
 .idea/
 .vscode/
 !web/dist/.keep
+
+# review screenshots (scripts/screenshots.sh)
+screenshots/

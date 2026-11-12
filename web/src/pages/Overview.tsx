@@ -1,41 +1,129 @@
 import type { ReactNode } from "react"
 import { Link } from "react-router"
 import { useQuery } from "@tanstack/react-query"
-import { Badge, Box, Button, Card, Grid, GridItem, HStack, Link as CLink, SegmentGroup, SimpleGrid, Skeleton, Stack, Table, Text } from "@chakra-ui/react"
-import { LuArrowRight, LuClock, LuServer, LuShieldAlert, LuShieldCheck, LuSparkles } from "react-icons/lu"
-import { api, type DailyStat, type Summary } from "@/lib/api"
+import { Badge, Box, Button, Card, Flex, Grid, GridItem, HStack, Heading, Link as CLink, SegmentGroup, SimpleGrid, Skeleton, Stack, Table, Text } from "@chakra-ui/react"
+import { LuArrowRight, LuServer, LuShieldAlert, LuShieldCheck } from "react-icons/lu"
+import { api, SEVERITIES, type Counts, type DailyStat, type Summary } from "@/lib/api"
 import { ago, num, pct } from "@/lib/format"
-import { ErrorBox, Header, KevBadge, KevMark, PageHeader, Panel, SeverityBadge, SeverityCounts, Empty } from "@/components/common"
+import { ErrorBox, Header, KevBadge, KevMark, Panel, SegmentBar, SeverityBadge, SeverityCounts, StatCard, Empty, type Segment } from "@/components/common"
 import { RankedBars, SeverityDonut, SeverityTrend } from "@/components/charts"
+import { FIX_OPTIONS } from "@/lib/options"
 import { useParamsState } from "@/lib/useParamsState"
+import { useSheet } from "@/lib/useSheet"
 
-function Kpi(props: { label: string; value: ReactNode; hint?: ReactNode; icon: ReactNode; to?: string; tone?: string }) {
-  const body = (
-    <Card.Root variant="outline" bg="surface" size="sm" h="full" _hover={props.to ? { borderColor: "border.emphasized" } : undefined}>
-      <Card.Body gap="1">
-        <HStack justify="space-between" color="fg.muted">
-          <Text textStyle="xs" fontWeight="medium" textTransform="uppercase" letterSpacing="wider">
-            {props.label}
-          </Text>
-          <Box color={props.tone ?? "fg.subtle"}>{props.icon}</Box>
-        </HStack>
-        <Text textStyle="3xl" fontWeight="semibold" letterSpacing="-0.02em" fontVariantNumeric="tabular-nums">
-          {props.value}
+const plural = (n: number, one: string, many: string) => `${num(n)} ${n === 1 ? one : many}`
+
+// The page opens with the one thing to do next, then the facts behind it.
+function StatusBanner({ s }: { s: Summary }) {
+  const unhealthy = s.stale_hosts + s.failing_hosts
+  let headline: ReactNode
+  let action: { to: string; label: string } | undefined
+  if (s.kev > 0) {
+    headline = (
+      <>
+        <KevMark /> {plural(s.kev, "known-exploited vulnerability", "known-exploited vulnerabilities")} to fix first
+      </>
+    )
+    action = { to: "/vulnerabilities?kev=true", label: "Review them" }
+  } else if (s.unique.critical > 0) {
+    headline = `${plural(s.unique.critical, "critical vulnerability", "critical vulnerabilities")} to review`
+    action = { to: "/vulnerabilities?severity=Critical", label: "Review them" }
+  } else if (unhealthy > 0) {
+    headline = unhealthy === 1 ? "1 host is not reporting as expected" : `${num(unhealthy)} hosts are not reporting as expected`
+    action = { to: "/hosts?status=stale", label: "Show hosts" }
+  } else {
+    headline = "Nothing urgent right now"
+  }
+  const facts = [
+    `${plural(s.hosts, "host", "hosts")} and ${plural(s.targets, "scan target", "scan targets")}`,
+    `last report ${ago(s.last_scan)}`,
+    `${plural(s.new_last_7d, "new finding", "new findings")} this week`,
+    `${plural(s.scans_24h, "scan", "scans")} in 24 h`,
+  ]
+  return (
+    <Flex align={{ base: "start", md: "center" }} justify="space-between" gap="4" mb="6" direction={{ base: "column", md: "row" }}>
+      <Box minW="0">
+        <Heading as="h2" size={{ base: "xl", md: "2xl" }} letterSpacing="-0.02em" display="flex" alignItems="center" gap="2.5">
+          {headline}
+        </Heading>
+        <Text color="fg.muted" textStyle="sm" mt="1.5">
+          {facts.join(" · ")}
         </Text>
-        {props.hint && (
-          <Text textStyle="xs" color="fg.muted">
-            {props.hint}
-          </Text>
-        )}
-      </Card.Body>
-    </Card.Root>
+      </Box>
+      {action && (
+        <Button asChild size="sm" variant="outline" flexShrink={0}>
+          <Link to={action.to}>
+            {action.label} <LuArrowRight />
+          </Link>
+        </Button>
+      )}
+    </Flex>
   )
-  return props.to ? (
-    <Link to={props.to} style={{ display: "block" }}>
-      {body}
-    </Link>
-  ) : (
-    body
+}
+
+// Green for what can be fixed today; the rest are steps of neutral.
+const FIX_COLORS: Record<string, string> = { fixed: "green.solid", "not-fixed": "fg.muted", "wont-fix": "fg.subtle", unknown: "border.emphasized" }
+
+function KpiCards({ s }: { s: Summary }) {
+  const severity: Segment[] = SEVERITIES.map((sev) => ({
+    label: sev,
+    value: s.unique[sev.toLowerCase() as keyof Counts],
+    color: `sev.${sev.toLowerCase()}`,
+    to: `/vulnerabilities?severity=${sev}`,
+  }))
+  const healthy = Math.max(0, s.hosts - s.stale_hosts - s.failing_hosts)
+  const health: Segment[] = [
+    { label: "Healthy", value: healthy, color: "green.solid", to: "/hosts?status=ok" },
+    { label: "Stale", value: s.stale_hosts, color: "yellow.solid", to: "/hosts?status=stale" },
+    { label: "Failing", value: s.failing_hosts, color: "red.solid", to: "/hosts?status=failing" },
+  ]
+  const fix: Segment[] = FIX_OPTIONS.map(([name, label]) => ({
+    label,
+    value: s.by_fix_state.find((x) => x.name === name)?.count ?? 0,
+    color: FIX_COLORS[name],
+    to: `/vulnerabilities?view=findings&fix=${name}`,
+  }))
+  const fixable = s.findings.total ? s.findings.fixable / s.findings.total : 0
+  const kev = s.top_vulns.filter((v) => v.kev).slice(0, 3)
+
+  return (
+    <SimpleGrid columns={{ base: 1, md: 2, xl: 4 }} gap="4" mb="4">
+      <StatCard label="Vulnerabilities" to="/vulnerabilities" value={num(s.unique.total)} unit={`in ${plural(s.findings.total, "finding", "findings")}`} icon={<LuShieldAlert />}>
+        <SegmentBar segments={severity} />
+      </StatCard>
+      <StatCard label="Hosts" to="/hosts" value={num(s.hosts)} unit={healthy === s.hosts ? "all reporting" : `${num(healthy)} reporting on schedule`} icon={<LuServer />}>
+        <SegmentBar segments={health} />
+      </StatCard>
+      <StatCard label="Fix available" to="/vulnerabilities?view=findings&fix=fixed" value={fixable ? pct(fixable, 0) : "0%"} unit={`${num(s.findings.fixable)} of ${num(s.findings.total)} findings`} icon={<LuShieldCheck />}>
+        <SegmentBar segments={fix} />
+      </StatCard>
+      {/* The diamond is the alert light: the only Signal orange on the page. */}
+      <StatCard label="Known exploited" to="/vulnerabilities?kev=true" value={num(s.kev)} unit="in the CISA KEV catalog" icon={<KevMark />}>
+        {s.kev === 0 ? (
+          <Text textStyle="xs" color="fg.muted">
+            None of the active vulnerabilities is known to be exploited.
+          </Text>
+        ) : (
+          <Stack gap="1.5">
+            {kev.map((v) => (
+              <HStack key={v.id} gap="2" justify="space-between" textStyle="xs">
+                <CLink asChild fontFamily="mono" fontWeight="medium" flexShrink={0}>
+                  <Link to={`/vulnerabilities/${encodeURIComponent(v.id)}`}>{v.id}</Link>
+                </CLink>
+                <Text color="fg.muted" truncate>
+                  {v.packages}
+                </Text>
+              </HStack>
+            ))}
+            {s.kev > kev.length && (
+              <Text textStyle="xs" color="fg.muted">
+                {kev.length ? `and ${num(s.kev - kev.length)} more` : "Open the list to see them"}
+              </Text>
+            )}
+          </Stack>
+        )}
+      </StatCard>
+    </SimpleGrid>
   )
 }
 
@@ -46,70 +134,45 @@ export function OverviewPage() {
   const days = ps.get("days")
   const summary = useQuery({ queryKey: ["summary"], queryFn: () => api.get<Summary>("/summary"), refetchInterval: 60_000 })
   const trends = useQuery({ queryKey: ["trends", days], queryFn: () => api.get<DailyStat[]>("/trends", { days }) })
+  const addHost = useSheet("add-host")
   const s = summary.data
 
   if (summary.error) return <ErrorBox error={summary.error} />
   if (!s)
     return (
-      <SimpleGrid columns={{ base: 2, lg: 3, xl: 6 }} gap="4">
-        {Array.from({ length: 6 }, (_, i) => (
-          <Skeleton key={i} h="28" rounded="lg" />
-        ))}
-      </SimpleGrid>
+      <>
+        <Skeleton h="8" w={{ base: "full", md: "md" }} mb="2" />
+        <Skeleton h="4" w={{ base: "3/4", md: "sm" }} mb="6" />
+        <SimpleGrid columns={{ base: 1, md: 2, xl: 4 }} gap="4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} h="40" rounded="l3" />
+          ))}
+        </SimpleGrid>
+      </>
     )
 
   if (s.hosts === 0)
     return (
-      <>
-        <PageHeader title="Overview" />
-        <Card.Root variant="outline" bg="surface">
-          <Card.Body>
-            <Empty
-              icon={<LuServer />}
-              title="No hosts have reported yet"
-              description="Install the agent on a VM or Docker host, or add a registry image to scan centrally."
-              action={
-                <Button asChild size="sm">
-                  <Link to="/settings">
-                    Set up an agent <LuArrowRight />
-                  </Link>
-                </Button>
-              }
-            />
-          </Card.Body>
-        </Card.Root>
-      </>
+      <Card.Root variant="outline" bg="surface">
+        <Card.Body>
+          <Empty
+            icon={<LuServer />}
+            title="No hosts have reported yet"
+            description="Install the agent on a VM or Docker host, or add a registry image to scan centrally."
+            action={
+              <Button size="sm" onClick={addHost.show}>
+                Add a host <LuArrowRight />
+              </Button>
+            }
+          />
+        </Card.Body>
+      </Card.Root>
     )
-
-  const fixable = s.findings.total ? s.findings.fixable / s.findings.total : 0
-  const unhealthy = s.stale_hosts + s.failing_hosts
 
   return (
     <>
-      <PageHeader
-        title="Overview"
-        description={
-          <>
-            Active findings across {num(s.hosts)} hosts and {num(s.targets)} scan targets · last report {ago(s.last_scan)}
-          </>
-        }
-      />
-
-      <SimpleGrid columns={{ base: 2, lg: 3, xl: 6 }} gap="4" mb="4">
-        <Kpi label="Critical" value={num(s.unique.critical)} hint={`${num(s.findings.critical)} affected packages`} icon={<LuShieldAlert />} tone="sev.critical" to="/vulnerabilities?severity=Critical" />
-        <Kpi label="High" value={num(s.unique.high)} hint={`${num(s.findings.high)} affected packages`} icon={<LuShieldAlert />} tone="sev.high" to="/vulnerabilities?severity=High" />
-        <Kpi label="Known exploited" value={num(s.kev)} hint="CISA KEV catalog" icon={<KevMark />} to="/vulnerabilities?kev=true" />
-        <Kpi label="Fix available" value={pct(fixable, 0)} hint={`${num(s.findings.fixable)} of ${num(s.findings.total)} findings`} icon={<LuShieldCheck />} tone="green.fg" to="/vulnerabilities?fix=fixed" />
-        <Kpi label="New this week" value={num(s.new_last_7d)} hint={`${num(s.scans_24h)} scans in 24h`} icon={<LuSparkles />} to="/vulnerabilities?sort=first_seen&order=desc" />
-        <Kpi
-          label="Hosts"
-          value={num(s.hosts)}
-          hint={unhealthy ? `${s.stale_hosts} stale · ${s.failing_hosts} failing` : "All reporting"}
-          icon={unhealthy ? <LuClock /> : <LuServer />}
-          tone={unhealthy ? "yellow.fg" : undefined}
-          to={unhealthy ? "/hosts?status=stale" : "/hosts"}
-        />
-      </SimpleGrid>
+      <StatusBanner s={s} />
+      <KpiCards s={s} />
 
       <Grid templateColumns={{ base: "1fr", xl: "2fr 1fr" }} gap="4" mb="4">
         <GridItem minW="0">
@@ -142,7 +205,7 @@ export function OverviewPage() {
             </CLink>
           }
         >
-          <Table.Root size="sm" mt="2">
+          <Table.Root size="md" mt="1">
             <Table.Header>
               <Table.Row>
                 <Header>Host</Header>
@@ -179,7 +242,7 @@ export function OverviewPage() {
             </CLink>
           }
         >
-          <Table.Root size="sm" mt="2">
+          <Table.Root size="md" mt="1">
             <Table.Header>
               <Table.Row>
                 <Header>Vulnerability</Header>

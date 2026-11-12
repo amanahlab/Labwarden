@@ -1,4 +1,4 @@
-import { HStack } from "@chakra-ui/react"
+import { Center, HStack } from "@chakra-ui/react"
 import { LuServer } from "react-icons/lu"
 import { KIND_ICON, KIND_LABEL } from "@/lib/options"
 
@@ -9,5 +9,15 @@ export function KindTag({ kind }: { kind: string }) {
       <Icon size={14} />
       {KIND_LABEL[kind] ?? kind}
     </HStack>
+  )
+}
+
+// Leading chip of a host row: the kind as an icon. The Kind column says it in words.
+export function KindChip({ kind }: { kind: string }) {
+  const Icon = KIND_ICON[kind] ?? LuServer
+  return (
+    <Center boxSize="8" rounded="l2" bg="bg.muted" color="fg.muted" flexShrink={0} aria-hidden="true">
+      <Icon size={16} />
+    </Center>
   )
 }

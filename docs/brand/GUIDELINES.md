@@ -75,3 +75,44 @@ Keep Signal for the alert light only. Don't colour the tower orange. Signal pair
 The web build can't read `docs/`, so the dashboard keeps its own copies. After changing a master, copy it over as well:
 - `web/public/`: `favicon.ico`, `favicon.svg` (the small cut, switches to white in dark mode), `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`, `manifest.json`
 - `web/src/assets/brand/`: the horizontal lockup and the symbol, colour and reversed, used in the sidebar and on the login page
+- `web/src/components/Brand.tsx`: the small cut, drawn inline as `BrandMark` for the collapsed sidebar
+
+## 8. Product UI
+The dashboard uses the same palette as the logo. The tokens live in `web/src/theme.ts`; pages use the tokens, never the hex values.
+
+**Surfaces**
+
+| Token | Light | Dark | Use it for |
+|---|---|---|---|
+| `canvas` | Paper | `#0A0C0F` | The ground: sidebar, top bar, login page |
+| `surface` | White | Ink | The content sheet, cards, side sheets |
+| `gray.solid` | Ink | White | Primary buttons and the selected state |
+| `fg.muted` | Slate | gray.400 | Secondary text |
+
+- The sidebar and the top bar sit on the canvas, with no border. The page is one rounded `surface` sheet on top of it.
+- Corners: controls 8 px (`l2`), cards 12 px (`l3`), the content sheet and side sheets 16 px (`sheet`).
+- Shadows are for things that float: side sheets use `overlay`. Cards, tables and the content sheet stay flat, with a hairline border.
+- Tables have no frame. The header is a tinted band of small uppercase labels. Short lists (Overview, Hosts) use the comfortable size, long ones (findings, scans, logs) the dense size.
+
+**Colour**
+
+- The accent is Ink. No gradients and no second accent colour. Links stay blue so they read as links.
+- **Signal is the alert light, here too.** It appears in the logo and as the diamond that marks a known-exploited (KEV) finding, and nowhere else. Buttons, badges and charts never use it, and no other orange stands in for it: "needs a look" is yellow.
+- Severity has its own fixed colours (`sev.*`). They always come with a text label.
+- A selected item never relies on colour alone: it also gets a border, a heavier weight or a check mark.
+- `fg.subtle` is for decoration (a dash in an empty cell, a zero count). Text that someone needs to read uses `fg` or `fg.muted`.
+
+**Logo in the dashboard**
+
+- Expanded sidebar: the horizontal lockup (`BrandLockup`), at least 120 px wide.
+- Login page: the detailed symbol (`BrandSymbol`), 48 px or larger.
+- Collapsed sidebar: the small cut (`BrandMark`), because the rail is narrower than 48 px.
+- Never set the name in a font next to the symbol.
+
+**Sheets and dialogs**
+
+- A task with a form opens in a side sheet (`Sheet`): adding a host or a registry image, editing a host, triage. The sheet floats in from the right with a gap to the window edge and takes the full width on a phone. Its footer stays in view: what will happen on the left, the buttons on the right.
+- An open sheet is part of the URL (`?sheet=…`), so Back closes it and a link can open it.
+- Confirming something destructive (deleting a host, revoking a token) stays a centered alert dialog.
+
+**Checking a change.** `scripts/screenshots.sh` renders every page in light and dark at three widths into `screenshots/` (not committed). Look at both modes before opening a pull request.

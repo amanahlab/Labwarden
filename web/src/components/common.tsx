@@ -1,19 +1,23 @@
 import { useEffect, useState, type ReactNode } from "react"
+import { Link as RouterLink } from "react-router"
 import {
   Alert,
   Badge,
   Box,
   ButtonGroup,
   Card,
+  Clipboard,
   EmptyState,
   Flex,
   HStack,
-  Heading,
   IconButton,
   Input,
   InputGroup,
+  LinkBox,
+  LinkOverlay,
   NativeSelect,
   Pagination,
+  SegmentGroup,
   Skeleton,
   Stack,
   Table,
@@ -40,19 +44,14 @@ import { BRAND, SEVERITY_COLORS } from "@/theme"
 import type { Counts, HostStatus, Severity, TriageStatus } from "@/lib/api"
 import { num, statusLabel } from "@/lib/format"
 
-export function PageHeader(props: { title: string; description?: ReactNode; actions?: ReactNode }) {
+// The page's one-line description and its actions. The title itself is in the
+// top bar (route handle.title, see Layout).
+export function PageHeader(props: { description?: ReactNode; actions?: ReactNode }) {
   return (
-    <Flex align={{ base: "start", md: "center" }} justify="space-between" gap="4" mb="6" direction={{ base: "column", md: "row" }}>
-      <Box>
-        <Heading size="xl" letterSpacing="-0.01em">
-          {props.title}
-        </Heading>
-        {props.description && (
-          <Text color="fg.muted" textStyle="sm" mt="1">
-            {props.description}
-          </Text>
-        )}
-      </Box>
+    <Flex align={{ base: "start", md: "center" }} justify="space-between" gap="4" mb="5" direction={{ base: "column", md: "row" }}>
+      <Text color="fg.muted" textStyle="sm">
+        {props.description}
+      </Text>
       {props.actions && <HStack gap="2">{props.actions}</HStack>}
     </Flex>
   )
@@ -155,8 +154,77 @@ export function SeverityCounts({ counts, showBar = true }: { counts: Counts; sho
   )
 }
 
+export type Segment = { label: string; value: number; color: string; to?: string }
+
+// A proportional bar with 2 px gaps and a labelled legend under it: the colour
+// is never the only carrier, every segment has its name and number.
+export function SegmentBar({ segments }: { segments: Segment[] }) {
+  const shown = segments.filter((s) => s.value > 0)
+  return (
+    <Stack gap="2.5">
+      <HStack gap="2px" h="2" w="full" aria-hidden="true">
+        {shown.length ? shown.map((s) => <Box key={s.label} h="full" rounded="full" bg={s.color} flexGrow={s.value} flexBasis="0" minW="1.5" />) : <Box h="full" w="full" rounded="full" bg="bg.emphasized" />}
+      </HStack>
+      <Flex wrap="wrap" columnGap="3" rowGap="1" textStyle="xs">
+        {segments.map((s) => {
+          const item = (
+            <HStack gap="1.5" color={s.value ? "fg" : "fg.muted"}>
+              <Box w="2" h="2" rounded="full" flexShrink={0} bg={s.color} />
+              <Text as="span" color="fg.muted">
+                {s.label}
+              </Text>
+              <Text as="span" fontWeight="medium" fontVariantNumeric="tabular-nums">
+                {num(s.value)}
+              </Text>
+            </HStack>
+          )
+          return s.to ? (
+            <Box asChild key={s.label} rounded="l1" _hover={{ textDecoration: "underline" }}>
+              <RouterLink to={s.to}>{item}</RouterLink>
+            </Box>
+          ) : (
+            <Box key={s.label}>{item}</Box>
+          )
+        })}
+      </Flex>
+    </Stack>
+  )
+}
+
+// Headline number of the Overview: label, large figure with its unit, then a
+// segment bar or any other detail. The label links the whole card; links
+// inside (legend entries) stay clickable on top of it.
+export function StatCard(props: { label: string; to: string; value: ReactNode; unit?: ReactNode; icon?: ReactNode; children?: ReactNode }) {
+  return (
+    <LinkBox asChild>
+      <Card.Root variant="outline" bg="surface" size="sm" h="full" transition="border-color 0.15s" _hover={{ borderColor: "border.emphasized" }}>
+        <Card.Body gap="3">
+          <HStack justify="space-between" color="fg.muted">
+            <LinkOverlay asChild textStyle="xs" fontWeight="medium" textTransform="uppercase" letterSpacing="wider">
+              <RouterLink to={props.to}>{props.label}</RouterLink>
+            </LinkOverlay>
+            {props.icon}
+          </HStack>
+          <HStack align="baseline" gap="2">
+            <Text textStyle="4xl" fontWeight="semibold" letterSpacing="-0.02em" lineHeight="1" fontVariantNumeric="tabular-nums">
+              {props.value}
+            </Text>
+            {props.unit && (
+              <Text textStyle="sm" color="fg.muted">
+                {props.unit}
+              </Text>
+            )}
+          </HStack>
+          <Box mt="auto">{props.children}</Box>
+        </Card.Body>
+      </Card.Root>
+    </LinkBox>
+  )
+}
+
 const TRIAGE: Record<TriageStatus, { palette: string; icon: ReactNode }> = {
-  open: { palette: "orange", icon: <LuCircleAlert /> },
+  // Yellow, not orange: orange on screen is the KEV diamond and nothing else.
+  open: { palette: "yellow", icon: <LuCircleAlert /> },
   acknowledged: { palette: "blue", icon: <LuEye /> },
   ignored: { palette: "gray", icon: <LuEyeOff /> },
   false_positive: { palette: "gray", icon: <LuBan /> },
@@ -345,6 +413,43 @@ export function Select(props: {
   )
 }
 
+// Above a table: search on the left, the page's views on the right.
+export function Toolbar({ children, views }: { children: ReactNode; views?: ReactNode }) {
+  return (
+    <Flex gap="3" align="center" justify="space-between" wrap="wrap" mb="3">
+      {children}
+      {views}
+    </Flex>
+  )
+}
+
+// The views of one list. A count is shown only where the API already has one.
+export function ViewTabs(props: { value: string; onChange: (v: string) => void; items: { value: string; label: string; count?: number }[]; label: string }) {
+  return (
+    <Box maxW="full" overflowX="auto">
+      <SegmentGroup.Root size="sm" value={props.value} onValueChange={(e) => e.value && props.onChange(e.value)} aria-label={props.label}>
+        <SegmentGroup.Indicator />
+        <SegmentGroup.Items
+          items={props.items.map((i) => ({
+            value: i.value,
+            label:
+              i.count === undefined ? (
+                i.label
+              ) : (
+                <HStack gap="1.5">
+                  {i.label}
+                  <Text as="span" color="fg.muted" fontVariantNumeric="tabular-nums">
+                    {num(i.count)}
+                  </Text>
+                </HStack>
+              ),
+          }))}
+        />
+      </SegmentGroup.Root>
+    </Box>
+  )
+}
+
 export function FilterBar({ children }: { children: ReactNode }) {
   return (
     <Flex gap="2" wrap="wrap" align="center" mb="4">
@@ -404,15 +509,67 @@ export function Mono({ children, ...rest }: { children: ReactNode; color?: strin
   )
 }
 
-// Table shell: horizontal scroll on small screens, sticky header.
-export function DataTable({ children, minW = "4xl" }: { children: ReactNode; minW?: string }) {
+// Table shell. It has no frame of its own: it sits straight on the sheet or in
+// a card, under a tinted header band, and scrolls sideways on small screens.
+// "sm" is the dense size (findings, scans, logs); "md" suits short lists.
+// Positioned, so visually hidden labels in the cells scroll with their row
+// instead of widening the page.
+export function DataTable({ children, minW = "4xl", size = "sm" }: { children: ReactNode; minW?: string; size?: "sm" | "md" }) {
   return (
-    <Card.Root variant="outline" bg="surface" overflow="hidden">
-      <Table.ScrollArea>
-        <Table.Root size="sm" interactive stickyHeader minW={minW}>
-          {children}
-        </Table.Root>
-      </Table.ScrollArea>
-    </Card.Root>
+    <Table.ScrollArea position="relative">
+      <Table.Root
+        size={size}
+        interactive
+        stickyHeader
+        minW={minW}
+        css={{
+          "& thead th": { bg: "bg.muted", borderBottomWidth: "0" },
+          "& thead th:first-of-type": { borderStartRadius: "l2" },
+          "& thead th:last-of-type": { borderEndRadius: "l2" },
+          "& :is(th, td):first-of-type": { ps: "3" },
+          "& :is(th, td):last-of-type": { pe: "3" },
+          "& tbody tr:last-of-type td": { borderBottomWidth: "0" },
+        }}
+      >
+        {children}
+      </Table.Root>
+    </Table.ScrollArea>
+  )
+}
+
+// Something to paste into a terminal or a file, with a copy button. Dark in
+// both colour modes, like a terminal.
+export function CodeBlock({ code }: { code: string }) {
+  return (
+    <Box position="relative" bg="gray.900" color="gray.100" rounded="l2" overflow="hidden">
+      {/* The pre scrolls, so the copy button stays in its corner; its own ground keeps long lines from showing through. */}
+      <Text as="pre" fontFamily="mono" textStyle="xs" whiteSpace="pre" p="4" pe="12" overflowX="auto">
+        {code}
+      </Text>
+      <Clipboard.Root value={code} position="absolute" top="2" right="2">
+        <Clipboard.Trigger asChild>
+          <IconButton size="xs" variant="ghost" bg="gray.900" color="gray.300" _hover={{ bg: "gray.700" }} aria-label="Copy">
+            <Clipboard.Indicator />
+          </IconButton>
+        </Clipboard.Trigger>
+      </Clipboard.Root>
+    </Box>
+  )
+}
+
+// One numbered step of a written procedure.
+export function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+  return (
+    <HStack align="start" gap="3">
+      <Badge variant="solid" rounded="full" size="sm" mt="0.5">
+        {n}
+      </Badge>
+      <Stack gap="2" flex="1" minW="0">
+        <Text fontWeight="medium" textStyle="sm">
+          {title}
+        </Text>
+        {children}
+      </Stack>
+    </HStack>
   )
 }

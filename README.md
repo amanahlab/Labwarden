@@ -7,11 +7,18 @@
 
 A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog their packages with [Syft](https://github.com/anchore/syft) on a schedule and push the SBOMs to one central server. The server matches them with [Grype](https://github.com/anchore/grype) against the only copy of the vulnerability DB, tracks what is new or fixed, and shows everything in a web UI. When a new DB arrives each night, every stored SBOM is matched again.
 
+<!-- The top 1600 × 1000 px of screenshots/<name>/overview-{light,dark}-1600.png (scripts/screenshots.sh), testbed data. -->
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/overview-dark.png">
+  <img src="docs/images/overview-light.png" alt="The LabWarden Overview page: a status line, four cards with counts, the findings trend and the riskiest hosts" width="100%">
+</picture>
+
 - **Overview**: critical/high counts, known exploited (CISA KEV), fix availability, a 7/30/90-day trend, the riskiest hosts and the top vulnerabilities.
 - **Vulnerabilities**: one row per CVE/GHSA, per package instance, per host or per package location (path on a target), each drilling down to its package instances. Search, sort, filter by severity, KEV, fix state, triage status, group and ecosystem. Paginated, with CSV export.
 - **Vulnerability detail**: description, references, CVSS, EPSS, risk, CWEs, affected packages, and triage (acknowledge, ignore, or mark as a false positive, globally or for one host).
 - **Hosts**: health (healthy, stale, failing), grouped by group or kind, plus per-host findings, targets, scan history and logs.
 - **Scans and Logs**: every report received, and every agent run, warning and error. Logs have a live tail.
+- **Add host**: three steps from any page (kind, enrollment token, install commands), and it notices when the host enrolls.
 - **Settings**: enrollment tokens, enrolled hosts, agent install snippets, central registry scans and system status.
 - **Alerts**: a webhook (Slack, Discord, Mattermost, Gotify, ntfy or anything that takes JSON) when a scan finds new critical or known-exploited vulnerabilities.
 
@@ -74,7 +81,7 @@ A host that misses more than 2.5× its reported interval is marked **stale**. A 
 
 ## Installing agents
 
-Create an enrollment token in **Settings → Enrollment tokens**, then follow the snippets on that page. They are pre-filled with the dashboard URL. The guides for the [Linux agent](docs/setup/agent-linux.md) and the [Docker agent](docs/setup/agent-docker.md) walk through every option. The token is only needed for the first run; revoking it later does not affect hosts that already enrolled.
+Click **Add host** in the sidebar: it asks what you are connecting, creates an enrollment token and shows the commands with the dashboard URL and the token filled in. It also tells you when the host has enrolled. To do the same by hand, create a token in **Settings → Enrollment tokens** and follow the snippets on that page. The guides for the [Linux agent](docs/setup/agent-linux.md) and the [Docker agent](docs/setup/agent-docker.md) walk through every option. The token is only needed for the first run; revoking it later does not affect hosts that already enrolled.
 
 The SHA-256 in Settings comes from the same dashboard as `install.sh`, so over plain http it catches a broken download, not an attacker on the network: serve the dashboard over https for that (see Security model).
 
@@ -174,6 +181,7 @@ docker compose --profile testbed up -d --build   # plus the proving ground
 scripts/test.sh     # go vet + go test, web lint + typecheck + build, shellcheck (all in containers)
 scripts/test.sh go  # one or more sections only: go, web, vuln, shell
 scripts/e2e.sh      # full stack + testbed: known CVEs, triage, central scans and retirement end to end
+scripts/screenshots.sh  # every page in light and dark at three widths, into screenshots/ (for reviewing UI changes)
 scripts/go.sh …     # any go command in the pinned toolchain container
 scripts/npm.sh …    # any npm command for web/
 ```
@@ -184,7 +192,7 @@ The proving ground runs a deliberately vulnerable "VM" (Debian 12 with log4j 2.1
 
 ### Releasing
 
-Push a version tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The release workflow (`.github/workflows/release.yml`) runs `scripts/test.sh`, then publishes `ghcr.io/amanahlab/labwarden` and `ghcr.io/amanahlab/labwarden-agent` for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z`, `X.Y` and `latest`, with SBOM and provenance attestations. The agent is published first, and the dashboard's Settings snippets embed that agent's tag and index digest, so each release shows its own agent. Then open a follow-up PR that pins the new tag and its multi-arch index digest (`docker buildx imagetools inspect ghcr.io/amanahlab/<image>:X.Y.Z`) everywhere the old one appears (`git grep -n 'ghcr.io/amanahlab/labwarden'`): the dashboard image in `docker-compose.yml`, the agent image in the Settings fallback for non-release builds (`web/src/pages/Settings.tsx`), `docs/setup/agent-docker.md` and this README.
+Push a version tag (`git tag vX.Y.Z && git push origin vX.Y.Z`). The release workflow (`.github/workflows/release.yml`) runs `scripts/test.sh`, then publishes `ghcr.io/amanahlab/labwarden` and `ghcr.io/amanahlab/labwarden-agent` for `linux/amd64` and `linux/arm64`, tagged `X.Y.Z`, `X.Y` and `latest`, with SBOM and provenance attestations. The agent is published first, and the dashboard's agent snippets (the Add host sheet and Settings) embed that agent's tag and index digest, so each release shows its own agent. Then open a follow-up PR that pins the new tag and its multi-arch index digest (`docker buildx imagetools inspect ghcr.io/amanahlab/<image>:X.Y.Z`) everywhere the old one appears (`git grep -n 'ghcr.io/amanahlab/labwarden'`): the dashboard image in `docker-compose.yml`, the agent image in the fallback for non-release builds (`web/src/lib/agent.ts`), `docs/setup/agent-docker.md` and this README.
 
 ## License
 
