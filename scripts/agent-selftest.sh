@@ -110,6 +110,26 @@ check "docker_inventory fails without docker or jq" 1 sh -c "PATH=/nonexistent; 
 docker_inventory"
 rm -rf "$WORK"
 
+# run_status against a dashboard older than the agent: the run with the
+# container list gets 400, so it is sent once more without the list.
+eval "$(sed -n '/^run_status()/,/^}/p' agent/labwarden-agent.sh)"
+WORK=$(mktemp -d)
+export LABWARDEN_HOST=h KIND=docker LABWARDEN_GROUP=g AGENT_VERSION=x LABWARDEN_INTERVAL=1 RUN_ID=r
+host_os() { echo os; }
+host_ip() { echo ip; }
+log() { echo "$1 $2" >>"$WORK/log"; }
+api() { # copies each body aside (api runs in $(...), so the count lives in files)
+	_n=$(find "$WORK" -name 'sent*' | wc -l)
+	cp "$3" "$WORK/sent$_n.json"
+	if grep -q '"images"' "$3"; then printf 400 && return 22; fi
+	printf 202
+}
+check "run_status falls back to a run without images" 0 run_status ok finished '[]' '[{"container":"c"}]'
+check "the first run carried the images" 0 grep -q '"images":\[{"container":"c"}\]}$' "$WORK/sent0.json"
+check "the second run left them out" 1 grep -q images "$WORK/sent1.json"
+check "the fallback was logged" 0 grep -q "^warn .*without it" "$WORK/log"
+rm -rf "$WORK"
+
 # A restarted container often hands the new run the pid of the run that was
 # killed holding the lock; exec keeps $$, so the lock names the agent itself.
 check "a lock holding the agent's own pid is stale" 0 sh -c '

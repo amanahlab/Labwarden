@@ -137,10 +137,11 @@ pass "a location row drills down to its $want findings"
 echo "== running images"
 # The testbed workload is listed with its host and container. Its status is not
 # asserted: with the containerd image store even a local build has a repo digest.
-api "$URL/api/v1/images?q=testbed-workload" | jqr -e \
-  '[.items[] | select(.name == "labwarden-testbed-workload" and (.hosts | any(.name == "testbed-docker" and (.containers | length) > 0)))] | length == 1' >/dev/null ||
-  fail "the testbed workload container is missing from the Images page"
-pass "running containers reach the Images page"
+workload_listed() {
+  api "$URL/api/v1/images?q=testbed-workload" | jqr -e \
+    '[.items[] | select(.name == "labwarden-testbed-workload" and (.hosts | any(.name == "testbed-docker" and (.containers | length) > 0)))] | length == 1'
+}
+wait_for 120 "running containers reach the Images page" workload_listed
 
 echo "== triage"
 VID=$(api "$URL/api/v1/vulnerabilities?q=CVE-2021-44228" | jqr -r '.items[0].id')
