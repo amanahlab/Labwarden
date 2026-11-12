@@ -10,9 +10,13 @@ name: release
 #
 # After each release, a follow-up PR pins the new tag and its multi-arch INDEX
 # digest wherever the old one appears (git grep -n 'ghcr.io/amanahlab/labwarden'),
-# found with docker buildx imagetools inspect. Never pin a platform digest: the index
-# also lists unknown/unknown attestation entries, and a platform digest would
-# lock every host to one architecture.
+# found with docker buildx imagetools inspect, or read from the GitHub Release the
+# github-release job creates. Never pin a platform digest: the index also lists
+# unknown/unknown attestation entries, and a platform digest would lock every
+# host to one architecture.
+#
+# Both indexes get a signed SLSA build provenance attestation (actions/attest),
+# which users check with: gh attestation verify oci://<image>@<digest> --repo amanahlab/Labwarden
 
 on:
   push:
@@ -21,13 +25,21 @@ on:
 
 concurrency: release-${{ github.ref }}
 
-permissions:
-  contents: read
-  packages: write
+permissions: {}
 
 jobs:
   release:
     runs-on: ubuntu-24.04
+    # No contents: write here: this job runs npm ci and the tests.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write # Sigstore signing certificate for the attestations
+      attestations: write
+      artifact-metadata: write # storage record for each attested image
+    outputs:
+      agent: ${{ steps.agent-image.outputs.image }}
+      server: ${{ steps.server-image.outputs.image }}
     steps:
       # metadata-action emits semver tags only for a semver tag ref; anything
       # else would reach the push with no image tag.
@@ -95,7 +107,13 @@ jobs:
             exit 1
           fi
           echo "image=$REF@$DIGEST" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/amanahlab/labwarden-agent
+          subject-digest: ${{ steps.agent.outputs.digest }}
+          push-to-registry: true
+      - id: server
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -107,3 +125,72 @@ jobs:
           provenance: mode=max
           sbom: true
           push: true
+      # Same check as for the agent; the index digest is what users pin.
+      - id: server-image
+        env:
+          REF: ghcr.io/amanahlab/labwarden:${{ steps.meta-server.outputs.version }}
+          DIGEST: ${{ steps.server.outputs.digest }}
+        run: |
+          index=$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' |
+            jq -r 'select(.mediaType == "application/vnd.oci.image.index.v1+json") | .digest')
+          if [ -z "$DIGEST" ] || [ "$index" != "$DIGEST" ]; then
+            echo "::error::$REF: pushed digest '$DIGEST' is not the index digest '$index'"
+            exit 1
+          fi
+          echo "image=$REF@$DIGEST" >> "$GITHUB_OUTPUT"
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ghcr.io/amanahlab/labwarden
+          subject-digest: ${{ steps.server.outputs.digest }}
+          push-to-registry: true
+
+  # The GitHub Release for the tag: both images by tag and index digest, how to
+  # verify them, then GitHub's generated notes. A rerun (workflow_dispatch)
+  # pushes new digests, so it rewrites the notes of the existing release.
+  github-release:
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      SERVER: ${{ needs.release.outputs.server }}
+      AGENT: ${{ needs.release.outputs.agent }}
+    steps:
+      - run: |
+          # The newest stable tag below this one; empty for the first release.
+          # TAG joins the list so a prerelease (not stable) still finds its place.
+          prev=$({ gh api "repos/$GH_REPO/tags" --paginate --jq '.[].name' |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'; echo "$TAG"; } | sort -uV |
+            awk -v t="$TAG" '$0 == t { exit } { p = $0 } END { print p }')
+          {
+            echo "## Images"
+            echo
+            echo "Pin them by tag and multi-arch index digest:"
+            echo
+            echo '```'
+            echo "$SERVER"
+            echo "$AGENT"
+            echo '```'
+            echo
+            echo "## Verify"
+            echo
+            echo "Both images carry a signed build provenance attestation from this repository's release workflow:"
+            echo
+            echo '```sh'
+            echo "gh attestation verify oci://${SERVER%%:*}@${SERVER#*@} --repo $GH_REPO"
+            echo "gh attestation verify oci://${AGENT%%:*}@${AGENT#*@} --repo $GH_REPO"
+            echo '```'
+            echo
+            gh api "repos/$GH_REPO/releases/generate-notes" -f tag_name="$TAG" \
+              ${prev:+-f previous_tag_name="$prev"} --jq .body
+          } > notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            case "$TAG" in *-*) pre=--prerelease ;; *) pre= ;; esac
+            # shellcheck disable=SC2086 # $pre is one flag or nothing
+            gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md $pre
+          fi
