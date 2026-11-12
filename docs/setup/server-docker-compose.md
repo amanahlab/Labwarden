@@ -114,7 +114,7 @@ All state lives in one Docker volume, `labwarden_labwarden-data`: the database, 
 mkdir -p backups && chmod 700 backups
 docker compose stop labwarden
 docker run --rm -v labwarden_labwarden-data:/data:ro -v "$PWD/backups:/backup" \
-  alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f \
+  alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf \
   tar czf "/backup/labwarden-$(date +%F).tar.gz" -C /data --exclude ./grype-db --exclude ./tmp --exclude ./admin-password .
 docker compose start labwarden
 ```

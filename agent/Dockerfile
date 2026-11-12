@@ -5,7 +5,7 @@ ARG SYFT_VERSION=v1.57.0
 ARG SYFT_DIGEST=sha256:3c70e6d5979364cefdc22b51617a78fd264574d3bd6b4f84a351204147025e2a
 FROM anchore/syft:${SYFT_VERSION}@${SYFT_DIGEST} AS syft
 
-FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 RUN apk add --no-cache ca-certificates curl jq gzip tzdata
 COPY --from=syft /syft /usr/local/bin/syft
 COPY labwarden-agent.sh /usr/local/bin/labwarden-agent

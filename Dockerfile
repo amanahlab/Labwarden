@@ -44,7 +44,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags 
 FROM anchore/grype:${GRYPE_VERSION}@${GRYPE_DIGEST} AS grype
 FROM anchore/syft:${SYFT_VERSION}@${SYFT_DIGEST} AS syft
 
-FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 RUN apk add --no-cache ca-certificates tzdata \
  && addgroup -S -g 10001 labwarden && adduser -S -u 10001 -G labwarden -h /data labwarden \
  && mkdir -p /data && chown labwarden:labwarden /data
