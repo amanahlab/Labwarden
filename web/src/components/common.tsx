@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react"
+import { Link as RouterLink } from "react-router"
 import {
   Alert,
   Badge,
@@ -11,6 +12,8 @@ import {
   IconButton,
   Input,
   InputGroup,
+  LinkBox,
+  LinkOverlay,
   NativeSelect,
   Pagination,
   Skeleton,
@@ -146,6 +149,74 @@ export function SeverityCounts({ counts, showBar = true }: { counts: Counts; sho
         </HStack>
       )}
     </Stack>
+  )
+}
+
+export type Segment = { label: string; value: number; color: string; to?: string }
+
+// A proportional bar with 2 px gaps and a labelled legend under it: the colour
+// is never the only carrier, every segment has its name and number.
+export function SegmentBar({ segments }: { segments: Segment[] }) {
+  const shown = segments.filter((s) => s.value > 0)
+  return (
+    <Stack gap="2.5">
+      <HStack gap="2px" h="2" w="full" aria-hidden="true">
+        {shown.length ? shown.map((s) => <Box key={s.label} h="full" rounded="full" bg={s.color} flexGrow={s.value} flexBasis="0" minW="1.5" />) : <Box h="full" w="full" rounded="full" bg="bg.emphasized" />}
+      </HStack>
+      <Flex wrap="wrap" columnGap="3" rowGap="1" textStyle="xs">
+        {segments.map((s) => {
+          const item = (
+            <HStack gap="1.5" color={s.value ? "fg" : "fg.muted"}>
+              <Box w="2" h="2" rounded="full" flexShrink={0} bg={s.color} />
+              <Text as="span" color="fg.muted">
+                {s.label}
+              </Text>
+              <Text as="span" fontWeight="medium" fontVariantNumeric="tabular-nums">
+                {num(s.value)}
+              </Text>
+            </HStack>
+          )
+          return s.to ? (
+            <Box asChild key={s.label} rounded="l1" _hover={{ textDecoration: "underline" }}>
+              <RouterLink to={s.to}>{item}</RouterLink>
+            </Box>
+          ) : (
+            <Box key={s.label}>{item}</Box>
+          )
+        })}
+      </Flex>
+    </Stack>
+  )
+}
+
+// Headline number of the Overview: label, large figure with its unit, then a
+// segment bar or any other detail. The label links the whole card; links
+// inside (legend entries) stay clickable on top of it.
+export function StatCard(props: { label: string; to: string; value: ReactNode; unit?: ReactNode; icon?: ReactNode; children?: ReactNode }) {
+  return (
+    <LinkBox asChild>
+      <Card.Root variant="outline" bg="surface" size="sm" h="full" transition="border-color 0.15s" _hover={{ borderColor: "border.emphasized" }}>
+        <Card.Body gap="3">
+          <HStack justify="space-between" color="fg.muted">
+            <LinkOverlay asChild textStyle="xs" fontWeight="medium" textTransform="uppercase" letterSpacing="wider">
+              <RouterLink to={props.to}>{props.label}</RouterLink>
+            </LinkOverlay>
+            {props.icon}
+          </HStack>
+          <HStack align="baseline" gap="2">
+            <Text textStyle="4xl" fontWeight="semibold" letterSpacing="-0.02em" lineHeight="1" fontVariantNumeric="tabular-nums">
+              {props.value}
+            </Text>
+            {props.unit && (
+              <Text textStyle="sm" color="fg.muted">
+                {props.unit}
+              </Text>
+            )}
+          </HStack>
+          <Box mt="auto">{props.children}</Box>
+        </Card.Body>
+      </Card.Root>
+    </LinkBox>
   )
 }
 
