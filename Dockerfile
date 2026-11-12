@@ -10,7 +10,7 @@ ARG GRYPE_DIGEST=sha256:6a36234da13f9faa327306ac0b3dab3405cfa2b4eb20c8f904125a87
 ARG SYFT_VERSION=v1.57.0
 ARG SYFT_DIGEST=sha256:3c70e6d5979364cefdc22b51617a78fd264574d3bd6b4f84a351204147025e2a
 
-FROM --platform=$BUILDPLATFORM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS web
+FROM --platform=$BUILDPLATFORM node:25-alpine@sha256:bdf2cca6fe3dabd014ea60163eca3f0f7015fbd5c7ee1b0e9ccb4ced6eb02ef4 AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -44,7 +44,7 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags 
 FROM anchore/grype:${GRYPE_VERSION}@${GRYPE_DIGEST} AS grype
 FROM anchore/syft:${SYFT_VERSION}@${SYFT_DIGEST} AS syft
 
-FROM alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 RUN apk add --no-cache ca-certificates tzdata \
  && addgroup -S -g 10001 labwarden && adduser -S -u 10001 -G labwarden -h /data labwarden \
  && mkdir -p /data && chown labwarden:labwarden /data
