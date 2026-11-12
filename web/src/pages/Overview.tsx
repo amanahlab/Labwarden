@@ -205,7 +205,7 @@ export function OverviewPage() {
             </CLink>
           }
         >
-          <Table.Root size="sm" mt="2">
+          <Table.Root size="md" mt="1">
             <Table.Header>
               <Table.Row>
                 <Header>Host</Header>
@@ -242,7 +242,7 @@ export function OverviewPage() {
             </CLink>
           }
         >
-          <Table.Root size="sm" mt="2">
+          <Table.Root size="md" mt="1">
             <Table.Header>
               <Table.Row>
                 <Header>Vulnerability</Header>

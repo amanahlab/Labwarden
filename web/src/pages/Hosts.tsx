@@ -1,7 +1,7 @@
 import { useMemo } from "react"
 import { Link } from "react-router"
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
-import { Badge, Card, Collapsible, Flex, HStack, Link as CLink, SegmentGroup, Stack, Table, Text } from "@chakra-ui/react"
+import { Badge, Card, Collapsible, Flex, HStack, Link as CLink, Stack, Table, Text } from "@chakra-ui/react"
 import { LuChevronDown, LuServer } from "react-icons/lu"
 import { api, type Counts, type GroupRow, type HostRow, type List } from "@/lib/api"
 import { ago, dateTime, interval, num } from "@/lib/format"
@@ -20,10 +20,12 @@ import {
   Select,
   SeverityCounts,
   SortHeader,
+  Toolbar,
+  ViewTabs,
 } from "@/components/common"
 import { ClearFilters } from "@/components/filters"
 import { Tooltip } from "@/components/ui/tooltip"
-import { KindTag } from "@/components/KindTag"
+import { KindChip, KindTag } from "@/components/KindTag"
 import { KIND_LABEL } from "@/lib/options"
 
 const DEFAULTS = { view: "list", sort: "score", order: "desc", size: "25" }
@@ -48,37 +50,38 @@ export function HostsPage() {
   return (
     <>
       <PageHeader description="Machines and images reporting to LabWarden, with their latest scan results." />
-      <Stack gap="3" mb="4">
-        <HStack gap="2" wrap="wrap">
-          <SegmentGroup.Root size="sm" value={view} onValueChange={(e) => ps.set({ view: e.value })} bg="surface">
-            <SegmentGroup.Indicator />
-            <SegmentGroup.Items
-              items={[
-                { value: "list", label: "List" },
-                { value: "group", label: "By group" },
-                { value: "kind", label: "By kind" },
-              ]}
-            />
-          </SegmentGroup.Root>
-          <SearchInput value={filters.q} onChange={(v) => ps.set({ q: v })} placeholder="Host name, IP, OS…" />
-        </HStack>
-        <FilterBar>
-          <Select label="Group" value={filters.group} onChange={(v) => ps.set({ group: v })} options={(groups.data ?? []).map((g) => g.name)} placeholder="All groups" />
-          <Select label="Kind" value={filters.kind} onChange={(v) => ps.set({ kind: v })} options={Object.entries(KIND_LABEL)} placeholder="All kinds" />
-          <Select
-            label="Health"
-            value={filters.status}
-            onChange={(v) => ps.set({ status: v })}
-            options={[
-              ["ok", "Healthy"],
-              ["stale", "Stale"],
-              ["failing", "Failing"],
+      <Toolbar
+        views={
+          <ViewTabs
+            label="View"
+            value={view}
+            onChange={(v) => ps.set({ view: v })}
+            items={[
+              { value: "list", label: "List" },
+              { value: "group", label: "By group" },
+              { value: "kind", label: "By kind" },
             ]}
-            placeholder="Any health"
           />
-          <ClearFilters show={hasFilters} onClear={() => ps.set(Object.fromEntries(FILTER_KEYS.map((k) => [k, null])))} />
-        </FilterBar>
-      </Stack>
+        }
+      >
+        <SearchInput value={filters.q} onChange={(v) => ps.set({ q: v })} placeholder="Host name, IP, OS…" />
+      </Toolbar>
+      <FilterBar>
+        <Select label="Group" value={filters.group} onChange={(v) => ps.set({ group: v })} options={(groups.data ?? []).map((g) => g.name)} placeholder="All groups" />
+        <Select label="Kind" value={filters.kind} onChange={(v) => ps.set({ kind: v })} options={Object.entries(KIND_LABEL)} placeholder="All kinds" />
+        <Select
+          label="Health"
+          value={filters.status}
+          onChange={(v) => ps.set({ status: v })}
+          options={[
+            ["ok", "Healthy"],
+            ["stale", "Stale"],
+            ["failing", "Failing"],
+          ]}
+          placeholder="Any health"
+        />
+        <ClearFilters show={hasFilters} onClear={() => ps.set(Object.fromEntries(FILTER_KEYS.map((k) => [k, null])))} />
+      </FilterBar>
 
       {hosts.error && <ErrorBox error={hosts.error} />}
       {grouped ? (
@@ -98,7 +101,7 @@ type PS = ReturnType<typeof useParamsState>
 function HostTable({ ps, hosts, loading, compact }: { ps: PS; hosts?: HostRow[]; loading?: boolean; compact?: boolean }) {
   const sh = { sort: ps.sort, order: ps.order, onSort: ps.toggleSort }
   return (
-    <DataTable minW="5xl">
+    <DataTable minW="5xl" size="md">
       <Table.Header>
         <Table.Row>
           <SortHeader label="Host" k="name" {...sh} />
@@ -117,14 +120,17 @@ function HostTable({ ps, hosts, loading, compact }: { ps: PS; hosts?: HostRow[];
         {hosts?.map((h) => (
           <Table.Row key={h.id}>
             <Table.Cell>
-              <Stack gap="0">
-                <CLink asChild fontWeight="semibold">
-                  <Link to={`/hosts/${h.id}`}>{h.name}</Link>
-                </CLink>
-                <Text textStyle="xs" color="fg.muted" truncate maxW="60">
-                  {[h.os, h.ip].filter(Boolean).join(" · ") || "—"}
-                </Text>
-              </Stack>
+              <HStack gap="3">
+                <KindChip kind={h.kind} />
+                <Stack gap="0" minW="0">
+                  <CLink asChild fontWeight="semibold">
+                    <Link to={`/hosts/${h.id}`}>{h.name}</Link>
+                  </CLink>
+                  <Text textStyle="xs" color="fg.muted" truncate maxW="60">
+                    {[h.os, h.ip].filter(Boolean).join(" · ") || "—"}
+                  </Text>
+                </Stack>
+              </HStack>
             </Table.Cell>
             <Table.Cell>
               <KindTag kind={h.kind} />
@@ -210,7 +216,7 @@ function GroupedHosts({ ps, hosts, by }: { ps: PS; hosts?: HostRow[]; by: "group
               </Flex>
             </Collapsible.Trigger>
             <Collapsible.Content>
-              <Card.Body p="0" borderTopWidth="1px">
+              <Card.Body p="2" borderTopWidth="1px">
                 <HostTable ps={ps} hosts={s.hosts} compact={by === "group"} />
               </Card.Body>
             </Collapsible.Content>

@@ -58,7 +58,7 @@ const config = defineConfig({
           variant: { line: { row: { bg: "transparent" } } },
           stickyHeader: { true: { header: { "& :where(tr)": { bg: "surface" } } } },
           size: {
-            sm: { columnHeader: { px: "3", py: "2.5" }, cell: { px: "3", py: "2.5" } },
+            sm: { columnHeader: { py: "2.5" }, cell: { py: "2.5" } },
             md: { columnHeader: { px: "4", py: "3" }, cell: { px: "4", py: "3.5" } },
           },
         },

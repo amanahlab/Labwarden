@@ -16,6 +16,7 @@ import {
   LinkOverlay,
   NativeSelect,
   Pagination,
+  SegmentGroup,
   Skeleton,
   Stack,
   Table,
@@ -410,6 +411,43 @@ export function Select(props: {
   )
 }
 
+// Above a table: search on the left, the page's views on the right.
+export function Toolbar({ children, views }: { children: ReactNode; views?: ReactNode }) {
+  return (
+    <Flex gap="3" align="center" justify="space-between" wrap="wrap" mb="3">
+      {children}
+      {views}
+    </Flex>
+  )
+}
+
+// The views of one list. A count is shown only where the API already has one.
+export function ViewTabs(props: { value: string; onChange: (v: string) => void; items: { value: string; label: string; count?: number }[]; label: string }) {
+  return (
+    <Box maxW="full" overflowX="auto">
+      <SegmentGroup.Root size="sm" value={props.value} onValueChange={(e) => e.value && props.onChange(e.value)} aria-label={props.label}>
+        <SegmentGroup.Indicator />
+        <SegmentGroup.Items
+          items={props.items.map((i) => ({
+            value: i.value,
+            label:
+              i.count === undefined ? (
+                i.label
+              ) : (
+                <HStack gap="1.5">
+                  {i.label}
+                  <Text as="span" color="fg.muted" fontVariantNumeric="tabular-nums">
+                    {num(i.count)}
+                  </Text>
+                </HStack>
+              ),
+          }))}
+        />
+      </SegmentGroup.Root>
+    </Box>
+  )
+}
+
 export function FilterBar({ children }: { children: ReactNode }) {
   return (
     <Flex gap="2" wrap="wrap" align="center" mb="4">
@@ -469,15 +507,30 @@ export function Mono({ children, ...rest }: { children: ReactNode; color?: strin
   )
 }
 
-// Table shell: horizontal scroll on small screens, sticky header.
-export function DataTable({ children, minW = "4xl" }: { children: ReactNode; minW?: string }) {
+// Table shell. It has no frame of its own: it sits straight on the sheet or in
+// a card, under a tinted header band, and scrolls sideways on small screens.
+// "sm" is the dense size (findings, scans, logs); "md" suits short lists.
+// Positioned, so visually hidden labels in the cells scroll with their row
+// instead of widening the page.
+export function DataTable({ children, minW = "4xl", size = "sm" }: { children: ReactNode; minW?: string; size?: "sm" | "md" }) {
   return (
-    <Card.Root variant="outline" bg="surface" overflow="hidden">
-      <Table.ScrollArea>
-        <Table.Root size="sm" interactive stickyHeader minW={minW}>
-          {children}
-        </Table.Root>
-      </Table.ScrollArea>
-    </Card.Root>
+    <Table.ScrollArea position="relative">
+      <Table.Root
+        size={size}
+        interactive
+        stickyHeader
+        minW={minW}
+        css={{
+          "& thead th": { bg: "bg.muted", borderBottomWidth: "0" },
+          "& thead th:first-of-type": { borderStartRadius: "l2" },
+          "& thead th:last-of-type": { borderEndRadius: "l2" },
+          "& :is(th, td):first-of-type": { ps: "3" },
+          "& :is(th, td):last-of-type": { pe: "3" },
+          "& tbody tr:last-of-type td": { borderBottomWidth: "0" },
+        }}
+      >
+        {children}
+      </Table.Root>
+    </Table.ScrollArea>
   )
 }
