@@ -100,3 +100,30 @@ func TestRunImagesLimits(t *testing.T) {
 		t.Errorf("images for another host: status %d, want 403", code)
 	}
 }
+
+func TestImageChecksOff(t *testing.T) {
+	ts, _ := newTestServer(t) // the test queue has no checker
+	c := login(t, ts, testPassword)
+	resp, err := c.Post(ts.URL+"/api/v1/images/check", "application/json", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("check now while off: status %d", resp.StatusCode)
+	}
+	var sys struct {
+		ImageCheck struct {
+			Enabled         bool     `json:"enabled"`
+			IntervalHours   float64  `json:"interval_hours"`
+			Registries      []string `json:"registries"`
+			WithCredentials []string `json:"with_credentials"`
+		} `json:"image_check"`
+	}
+	if code := getJSON(t, c, ts.URL+"/api/v1/system", &sys); code != http.StatusOK {
+		t.Fatalf("system: %d", code)
+	}
+	if ic := sys.ImageCheck; ic.Enabled || ic.IntervalHours != 24 || ic.Registries == nil || ic.WithCredentials == nil {
+		t.Errorf("image_check = %+v", ic)
+	}
+}

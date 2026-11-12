@@ -250,6 +250,11 @@ func (s *Server) ingestRun(w http.ResponseWriter, r *http.Request) {
 				s.storeErr(w, r, err)
 				return
 			}
+			// New images get their upstream status within minutes, not at
+			// the next sweep. The run is stored either way.
+			if _, err := s.jobs.EnqueueImageChecks(r.Context(), m.Host); err != nil {
+				s.log.Warn("queue image checks", "host", m.Host, "err", err)
+			}
 		}
 		if dropped > 0 {
 			s.event(r, "warn", "agent", m.Host, m.RunID, fmt.Sprintf("ignored %d container(s) with an invalid name, image reference or image ID", dropped))

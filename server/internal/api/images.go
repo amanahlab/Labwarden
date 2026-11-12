@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/registry"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
@@ -104,4 +105,46 @@ func (s *Server) listImageRegistries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// checkImages queues an upstream check of every running image now.
+func (s *Server) checkImages(w http.ResponseWriter, r *http.Request) {
+	queued, err := s.jobs.EnqueueImageCheckAll(r.Context())
+	if errors.Is(err, jobs.ErrImageChecksOff) {
+		writeErr(w, http.StatusServiceUnavailable, "image update checks are turned off (LABWARDEN_IMAGE_CHECK=false)")
+		return
+	}
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
+	if !queued {
+		writeErr(w, http.StatusConflict, "an image check is already queued")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]bool{"queued": true})
+}
+
+// imageCheck is the Settings view of image update checks: registry host
+// names only, never credentials.
+type imageCheck struct {
+	Enabled         bool     `json:"enabled"`
+	IntervalHours   float64  `json:"interval_hours"`
+	Registries      []string `json:"registries"`
+	WithCredentials []string `json:"with_credentials"`
+	LastChecked     string   `json:"last_checked"`
+}
+
+func (s *Server) imageCheckStatus(r *http.Request) (imageCheck, error) {
+	c, every := s.jobs.ImageChecks()
+	out := imageCheck{Enabled: c != nil, IntervalHours: every.Hours(), Registries: []string{}, WithCredentials: []string{}}
+	if c != nil {
+		out.Registries, out.WithCredentials = c.Registries(), c.Credentials()
+		if out.WithCredentials == nil {
+			out.WithCredentials = []string{}
+		}
+	}
+	var err error
+	out.LastChecked, err = s.st.LastImageCheck(r.Context())
+	return out, err
 }

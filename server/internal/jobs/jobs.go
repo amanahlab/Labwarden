@@ -7,6 +7,8 @@
 //   - scan: grype work, MaxWorkers bounds concurrent grype processes
 //   - db:   vulnerability DB updates, one worker so there is never a second download
 //   - maintenance: quick bookkeeping such as queueing due central targets
+//   - registry: upstream checks of running images, one at a time to stay
+//     gentle with registry rate limits
 package jobs
 
 import (
@@ -31,9 +33,10 @@ import (
 )
 
 const (
-	QueueScan  = "scan"
-	QueueDB    = "db"
-	QueueMaint = "maintenance"
+	QueueScan     = "scan"
+	QueueDB       = "db"
+	QueueMaint    = "maintenance"
+	QueueRegistry = "registry"
 
 	// SQLite has no LISTEN/NOTIFY, so workers poll. 100 ms measured a p99
 	// pickup of about 100 ms on a homelab box; the cost is an indexed query.
@@ -67,6 +70,9 @@ type Config struct {
 	SBOMs        *sboms.Files // uploaded SBOMs
 	MaxQueued    int          // SubmitSBOM refuses work beyond this backlog
 	MinFreeBytes uint64       // SubmitSBOM refuses uploads when the SBOM disk has less free
+
+	ImageChecker    ImageChecker  // nil turns image update checks off
+	ImageCheckEvery time.Duration // how often each running repository is checked (default 24 h)
 }
 
 // ErrBusy means the server is not taking uploads right now; the agent keeps
@@ -118,6 +124,8 @@ func Open(ctx context.Context, cfg Config, st *store.Store, sc *scanner.Scanner,
 	river.AddWorker(workers, &sbomGCWorker{q: q})
 	river.AddWorker(workers, &scheduleWorker{q: q})
 	river.AddWorker(workers, &matchSBOMWorker{q: q})
+	river.AddWorker(workers, &imageCheckWorker{q: q})
+	river.AddWorker(workers, &imageCheckAllWorker{q: q})
 
 	periodic := []*river.PeriodicJob{
 		river.NewPeriodicJob(daily,
@@ -132,13 +140,19 @@ func Open(ctx context.Context, cfg Config, st *store.Store, sc *scanner.Scanner,
 			func() (river.JobArgs, *river.InsertOpts) { return ScheduleArgs{}, nil },
 			&river.PeriodicJobOpts{ID: "schedule", RunOnStart: true}))
 	}
+	if cfg.ImageChecker != nil {
+		periodic = append(periodic, river.NewPeriodicJob(river.PeriodicInterval(min(imageSweep, q.imageEvery())),
+			func() (river.JobArgs, *river.InsertOpts) { return ImageCheckAllArgs{}, nil },
+			&river.PeriodicJobOpts{ID: "image_check_all", RunOnStart: true}))
+	}
 
 	q.client, err = river.NewClient(drv, &river.Config{
 		Logger: log.With("component", "jobs"),
 		Queues: map[string]river.QueueConfig{
-			QueueScan:  {MaxWorkers: max(cfg.ScanWorkers, 1), FetchPollInterval: pollInterval},
-			QueueDB:    {MaxWorkers: 1, FetchPollInterval: time.Second},
-			QueueMaint: {MaxWorkers: 1, FetchPollInterval: time.Second},
+			QueueScan:     {MaxWorkers: max(cfg.ScanWorkers, 1), FetchPollInterval: pollInterval},
+			QueueDB:       {MaxWorkers: 1, FetchPollInterval: time.Second},
+			QueueMaint:    {MaxWorkers: 1, FetchPollInterval: time.Second},
+			QueueRegistry: {MaxWorkers: 1, FetchPollInterval: time.Second},
 		},
 		Workers:      workers,
 		PeriodicJobs: periodic,
@@ -271,10 +285,11 @@ func (q *Queue) event(ctx context.Context, level string, m store.IngestMeta, msg
 type Stats struct {
 	Queued       int    `json:"queued"` // available, scheduled or waiting to retry
 	Running      int    `json:"running"`
-	Failed24     int    `json:"failed_24h"` // gave up in the last 24 hours
-	Rematching   int    `json:"rematching"` // re-matches queued or running
+	Failed24     int    `json:"failed_24h"`             // gave up in the last 24 hours
+	Rematching   int    `json:"rematching"`             // re-matches queued or running
 	LastRematch  string `json:"last_rematch,omitempty"` // within CompletedJobRetentionPeriod
 	NextDBUpdate string `json:"next_db_update"`
+	ImageChecks  int    `json:"image_checks"` // image update checks queued or running
 }
 
 func (q *Queue) Stats(ctx context.Context) (Stats, error) {
@@ -284,8 +299,9 @@ func (q *Queue) Stats(ctx context.Context) (Stats, error) {
 		COALESCE(SUM(state = 'running'),0),
 		COALESCE(SUM(state = 'discarded' AND finalized_at > datetime('now','-1 day')),0),
 		COALESCE(SUM(kind = 'rematch' AND state IN ('available','scheduled','retryable','pending','running')),0),
-		COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', MAX(CASE WHEN kind = 'rematch' AND state = 'completed' THEN finalized_at END)),'')
-		FROM river_job`).Scan(&s.Queued, &s.Running, &s.Failed24, &s.Rematching, &s.LastRematch)
+		COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', MAX(CASE WHEN kind = 'rematch' AND state = 'completed' THEN finalized_at END)),''),
+		COALESCE(SUM(kind IN ('image_check','image_check_all') AND state IN ('available','scheduled','retryable','pending','running')),0)
+		FROM river_job`).Scan(&s.Queued, &s.Running, &s.Failed24, &s.Rematching, &s.LastRematch, &s.ImageChecks)
 	return s, err
 }
 
