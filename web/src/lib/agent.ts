@@ -4,7 +4,7 @@
 // A release build embeds the agent image published with it (release.yml passes
 // AGENT_IMAGE to the Dockerfile). Other builds use this pin of the latest
 // release: tag + multi-arch index digest (docker buildx imagetools inspect).
-export const agentImage = import.meta.env.VITE_AGENT_IMAGE || "ghcr.io/amanahlab/labwarden-agent:0.1.3@sha256:3dbf72645808017245536ca81db26f321b22e8e262ca7bb9dc555c5fe04dc4fa"
+export const agentImage = import.meta.env.VITE_AGENT_IMAGE || "ghcr.io/amanahlab/labwarden-agent:0.2.0@sha256:3cf85ba2ec4887d2bd162132f54e2b7d924fac776274c9e1276ba450a0e5bad9"
 
 export const TTL_OPTIONS: [string, string][] = [
   ["1", "Expires in 1 hour"],
