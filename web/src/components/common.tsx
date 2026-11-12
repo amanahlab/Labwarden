@@ -8,7 +8,6 @@ import {
   EmptyState,
   Flex,
   HStack,
-  Heading,
   IconButton,
   Input,
   InputGroup,
@@ -40,19 +39,14 @@ import { BRAND, SEVERITY_COLORS } from "@/theme"
 import type { Counts, HostStatus, Severity, TriageStatus } from "@/lib/api"
 import { num, statusLabel } from "@/lib/format"
 
-export function PageHeader(props: { title: string; description?: ReactNode; actions?: ReactNode }) {
+// The page's one-line description and its actions. The title itself is in the
+// top bar (route handle.title, see Layout).
+export function PageHeader(props: { description?: ReactNode; actions?: ReactNode }) {
   return (
-    <Flex align={{ base: "start", md: "center" }} justify="space-between" gap="4" mb="6" direction={{ base: "column", md: "row" }}>
-      <Box>
-        <Heading size="xl" letterSpacing="-0.01em">
-          {props.title}
-        </Heading>
-        {props.description && (
-          <Text color="fg.muted" textStyle="sm" mt="1">
-            {props.description}
-          </Text>
-        )}
-      </Box>
+    <Flex align={{ base: "start", md: "center" }} justify="space-between" gap="4" mb="5" direction={{ base: "column", md: "row" }}>
+      <Text color="fg.muted" textStyle="sm">
+        {props.description}
+      </Text>
       {props.actions && <HStack gap="2">{props.actions}</HStack>}
     </Flex>
   )

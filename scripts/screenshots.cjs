@@ -3,8 +3,9 @@
 const { chromium } = require("playwright")
 
 const BASE = "http://127.0.0.1:8080"
-const WIDTHS = [1600, 1024, 390]
-const SCHEMES = ["light", "dark"]
+const WIDTHS = (process.env.WIDTHS || "1600,1024,390").split(",").map(Number)
+const HEIGHT = 1000
+const SCHEMES = (process.env.SCHEMES || "light,dark").split(",")
 
 async function json(path) {
   const r = await fetch(BASE + path)
@@ -48,7 +49,7 @@ async function main() {
   const browser = await chromium.launch()
   for (const scheme of SCHEMES) {
     for (const width of WIDTHS) {
-      const ctx = await browser.newContext({ viewport: { width, height: 1000 }, colorScheme: scheme })
+      const ctx = await browser.newContext({ viewport: { width, height: HEIGHT }, colorScheme: scheme })
       const page = await ctx.newPage()
       page.on("pageerror", (e) => console.error(`page error: ${e.message}`))
       for (const [name, path] of routes) {
@@ -59,7 +60,18 @@ async function main() {
           .waitForFunction(() => !document.querySelector(".chakra-skeleton, .chakra-spinner"), null, { timeout: 15000 })
           .catch(() => console.error(`${name}: still loading after 15 s`))
         await page.waitForTimeout(900)
+        // The content sheet (<main>) is the scroll container: grow the window
+        // until the whole page is in view.
+        const hidden = await page.evaluate(() => {
+          const m = document.querySelector("main")
+          return m ? m.scrollHeight - m.clientHeight : 0
+        })
+        if (hidden > 0) {
+          await page.setViewportSize({ width, height: HEIGHT + hidden })
+          await page.waitForTimeout(300)
+        }
         await page.screenshot({ path: `/out/${name}-${scheme}-${width}.png`, fullPage: true })
+        if (hidden > 0) await page.setViewportSize({ width, height: HEIGHT })
       }
       await ctx.close()
       console.log(`${scheme} ${width}px: ${routes.length} pages`)

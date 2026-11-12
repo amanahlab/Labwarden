@@ -12,7 +12,7 @@ export function ScansPage() {
   const q = useQuery({ queryKey: ["scans", params], queryFn: () => api.get<List<ScanRow>>("/scans", params), placeholderData: keepPreviousData, refetchInterval: 30_000 })
   return (
     <>
-      <PageHeader title="Scans" description="Every Grype report received, newest first, with the change against the previous scan of the same target." />
+      <PageHeader description="Every Grype report received, newest first, with the change against the previous scan of the same target." />
       <FilterBar>
         <SearchInput value={params.q} onChange={(v) => ps.set({ q: v })} placeholder="Host or target…" />
         <Select

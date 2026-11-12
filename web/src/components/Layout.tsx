@@ -1,94 +1,172 @@
-import { useState, type ReactNode } from "react"
-import { NavLink, Outlet, useNavigate, useNavigation } from "react-router"
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import { Link, NavLink, Outlet, useLocation, useMatches, useNavigate, useNavigation } from "react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Box, Badge, Drawer, Flex, HStack, IconButton, Portal, Stack, Text, CloseButton, chakra, Input, InputGroup, Kbd } from "@chakra-ui/react"
+import { Badge, Box, Button, CloseButton, Drawer, Flex, HStack, Heading, IconButton, Input, InputGroup, Kbd, Portal, Separator, Stack, chakra } from "@chakra-ui/react"
 import {
   LuActivity,
   LuGauge,
   LuLogOut,
   LuMenu,
+  LuPanelLeftClose,
+  LuPanelLeftOpen,
+  LuPlus,
   LuScrollText,
+  LuSearch,
   LuServer,
   LuSettings,
   LuShieldAlert,
-  LuSearch,
 } from "react-icons/lu"
-import { BrandLockup } from "@/components/Brand"
+import { BrandLockup, BrandMark } from "@/components/Brand"
+import { ScannerStatus } from "@/components/ScannerStatus"
 import { ColorModeButton } from "@/components/ui/color-mode"
 import { Tooltip } from "@/components/ui/tooltip"
 import { api, type Me, type Summary } from "@/lib/api"
 import { num } from "@/lib/format"
 
-const NAV = [
+type NavEntry = { to: string; label: string; icon: typeof LuGauge; end?: boolean }
+
+// What needs attention, then how the data got here; Settings sits at the bottom.
+const NAV_FINDINGS: NavEntry[] = [
   { to: "/", label: "Overview", icon: LuGauge, end: true },
   { to: "/vulnerabilities", label: "Vulnerabilities", icon: LuShieldAlert },
   { to: "/hosts", label: "Hosts", icon: LuServer },
+]
+const NAV_ACTIVITY: NavEntry[] = [
   { to: "/scans", label: "Scans", icon: LuActivity },
   { to: "/logs", label: "Logs", icon: LuScrollText },
-  { to: "/settings", label: "Settings", icon: LuSettings },
 ]
+const NAV_SETTINGS: NavEntry = { to: "/settings", label: "Settings", icon: LuSettings }
+
+const COLLAPSED_KEY = "labwarden.sidebar-collapsed"
+
+// Storage can be unavailable (private mode, blocked cookies): the rail then
+// just does not persist.
+function readCollapsed() {
+  try {
+    return localStorage.getItem(COLLAPSED_KEY) === "1"
+  } catch {
+    return false
+  }
+}
 
 const NavItem = chakra(NavLink)
 
-function Nav({ onNavigate }: { onNavigate?: () => void }) {
-  const summary = useQuery({ queryKey: ["summary"], queryFn: () => api.get<Summary>("/summary") })
-  const badges: Record<string, ReactNode> = {
-    "/vulnerabilities": summary.data?.unique.critical ? (
-      <Badge size="xs" colorPalette="red" variant="solid" ms="auto">
-        {num(summary.data.unique.critical)}
-      </Badge>
-    ) : null,
-    "/hosts":
-      summary.data && summary.data.stale_hosts + summary.data.failing_hosts > 0 ? (
-        <Badge size="xs" colorPalette="yellow" variant="subtle" ms="auto">
-          {summary.data.stale_hosts + summary.data.failing_hosts}
-        </Badge>
-      ) : null,
-  }
-  return (
-    <Stack gap="0.5" as="nav" aria-label="Main">
-      {NAV.map((n) => (
-        <NavItem
-          key={n.to}
-          to={n.to}
-          end={n.end}
-          onClick={onNavigate}
-          display="flex"
-          alignItems="center"
-          gap="3"
-          px="3"
-          py="2"
-          rounded="md"
-          textStyle="sm"
-          fontWeight="medium"
-          color="fg.muted"
-          _hover={{ bg: "bg.muted", color: "fg" }}
-          // On the neutral palette the hover gray is close to any active fill,
-          // so the active item also gets a heavier weight and an Ink edge bar.
-          css={{
-            "&.active": {
-              bg: "colorPalette.muted",
-              color: "fg",
-              fontWeight: "semibold",
-              boxShadow: "inset 3px 0 0 {colors.colorPalette.solid}",
-            },
-          }}
-        >
-          <n.icon size={16} />
-          {n.label}
-          {badges[n.to]}
-        </NavItem>
-      ))}
-    </Stack>
+function NavRow({ entry, badge, collapsed, onNavigate }: { entry: NavEntry; badge?: ReactNode; collapsed?: boolean; onNavigate?: () => void }) {
+  const item = (
+    <NavItem
+      to={entry.to}
+      end={entry.end}
+      onClick={onNavigate}
+      aria-label={collapsed ? entry.label : undefined}
+      position="relative"
+      display="flex"
+      alignItems="center"
+      justifyContent={collapsed ? "center" : undefined}
+      gap="3"
+      h="9"
+      px={collapsed ? "0" : "3"}
+      rounded="l2"
+      textStyle="sm"
+      fontWeight="medium"
+      color="fg.muted"
+      _hover={{ bg: "bg.emphasized/60", color: "fg" }}
+      // The current page is a raised chip: sheet colour, hairline, heavier
+      // weight. It never relies on a colour change alone.
+      css={{
+        "&.active": {
+          bg: "surface",
+          color: "fg",
+          fontWeight: "semibold",
+          boxShadow: "0 0 0 1px {colors.border}",
+        },
+      }}
+    >
+      <entry.icon size={16} />
+      {!collapsed && entry.label}
+      {badge && (
+        <Box ms={collapsed ? undefined : "auto"} position={collapsed ? "absolute" : undefined} top="-1" right="-1" lineHeight="1">
+          {badge}
+        </Box>
+      )}
+    </NavItem>
+  )
+  return collapsed ? (
+    <Tooltip content={entry.label} positioning={{ placement: "right" }}>
+      {item}
+    </Tooltip>
+  ) : (
+    item
   )
 }
 
-// The wordmark is artwork: never retype "LabWarden" in a font next to the symbol.
-function Brand() {
+function Sidebar({ collapsed, onToggle, onNavigate }: { collapsed?: boolean; onToggle?: () => void; onNavigate?: () => void }) {
+  const qc = useQueryClient()
+  const me = qc.getQueryData<Me>(["me"])
+  const summary = useQuery({ queryKey: ["summary"], queryFn: () => api.get<Summary>("/summary") })
+  const s = summary.data
+  const badges: Record<string, ReactNode> = {
+    "/vulnerabilities": s?.unique.critical ? (
+      <Badge size="xs" colorPalette="red" variant="solid" aria-label={`${s.unique.critical} critical`}>
+        {num(s.unique.critical)}
+      </Badge>
+    ) : null,
+    "/hosts":
+      s && s.stale_hosts + s.failing_hosts > 0 ? (
+        <Badge size="xs" colorPalette="yellow" variant="subtle" aria-label={`${s.stale_hosts + s.failing_hosts} stale or failing`}>
+          {s.stale_hosts + s.failing_hosts}
+        </Badge>
+      ) : null,
+  }
+  const rows = (entries: NavEntry[]) => entries.map((n) => <NavRow key={n.to} entry={n} badge={badges[n.to]} collapsed={collapsed} onNavigate={onNavigate} />)
+
   return (
-    <Box px="3" mb="6">
-      <BrandLockup />
-    </Box>
+    <>
+      {/* The wordmark is artwork: never retype "LabWarden" in a font next to the symbol. */}
+      <Flex align="center" gap="2" direction={collapsed ? "column" : "row"} ps={collapsed ? "0" : "2"} minH="9">
+        {collapsed ? <BrandMark size={28} /> : <BrandLockup width={128} />}
+        {!collapsed && me?.version && (
+          <Badge size="xs" variant="outline" color="fg.muted">
+            {me.version}
+          </Badge>
+        )}
+        {onToggle && (
+          <Tooltip content={collapsed ? "Expand sidebar" : "Collapse sidebar"} positioning={{ placement: "right" }}>
+            <IconButton aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!collapsed} variant="ghost" size="xs" color="fg.muted" ms={collapsed ? undefined : "auto"} onClick={onToggle}>
+              {collapsed ? <LuPanelLeftOpen /> : <LuPanelLeftClose />}
+            </IconButton>
+          </Tooltip>
+        )}
+      </Flex>
+
+      {collapsed ? (
+        <Tooltip content="Add host" positioning={{ placement: "right" }}>
+          <IconButton asChild size="sm" aria-label="Add host" w="full">
+            <Link to="/settings">
+              <LuPlus />
+            </Link>
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <Button asChild size="sm" w="full">
+          <Link to="/settings" onClick={onNavigate}>
+            <LuPlus /> Add host
+          </Link>
+        </Button>
+      )}
+
+      <Stack as="nav" aria-label="Main" gap="1">
+        {rows(NAV_FINDINGS)}
+        <Separator my="2" />
+        {rows(NAV_ACTIVITY)}
+      </Stack>
+
+      <Stack gap="3" mt="auto">
+        <ScannerStatus collapsed={collapsed} onNavigate={onNavigate} />
+        <Stack as="nav" aria-label="Settings" gap="1">
+          {rows([NAV_SETTINGS])}
+        </Stack>
+      </Stack>
+    </>
   )
 }
 
@@ -96,9 +174,33 @@ export function Layout() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const navigating = useNavigation().state === "loading"
+  const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(readCollapsed)
   const [search, setSearch] = useState("")
   const me = qc.getQueryData<Me>(["me"])
+  const main = useRef<HTMLDivElement>(null)
+  // Each route names its section (App.tsx); the deepest match wins.
+  const title = useMatches()
+    .map((m) => (m.handle as { title?: string } | undefined)?.title)
+    .filter(Boolean)
+    .at(-1)
+
+  // The sheet scrolls, not the window: start every page at its top.
+  useEffect(() => {
+    main.current?.scrollTo(0, 0)
+  }, [pathname])
+
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      try {
+        localStorage.setItem(COLLAPSED_KEY, c ? "0" : "1")
+      } catch {
+        /* not persisted */
+      }
+      return !c
+    })
+  }
 
   async function logout() {
     await api.post("/auth/logout").catch(() => {})
@@ -108,38 +210,18 @@ export function Layout() {
   }
 
   return (
-    <Flex minH="100vh">
-      <Box
-        as="aside"
-        display={{ base: "none", lg: "flex" }}
-        flexDirection="column"
-        w="60"
-        flexShrink={0}
-        borderEndWidth="1px"
-        bg="surface"
-        py="5"
-        px="3"
-        position="sticky"
-        top="0"
-        h="100vh"
-      >
-        <Brand />
-        <Nav />
-        <Box mt="auto" px="3">
-          <Text textStyle="xs" color="fg.subtle">
-            LabWarden {me?.version ?? ""}
-          </Text>
-        </Box>
-      </Box>
+    <Flex h="100dvh" overflow="hidden" bg="canvas">
+      <Flex as="aside" display={{ base: "none", lg: "flex" }} direction="column" gap="4" w={collapsed ? "16" : "60"} flexShrink={0} py="3" px="3" overflowY="auto">
+        <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
+      </Flex>
 
       <Drawer.Root open={open} onOpenChange={(e) => setOpen(e.open)} placement="start" size="xs">
         <Portal>
           <Drawer.Backdrop />
           <Drawer.Positioner>
-            <Drawer.Content>
-              <Drawer.Body pt="5">
-                <Brand />
-                <Nav onNavigate={() => setOpen(false)} />
+            <Drawer.Content bg="canvas">
+              <Drawer.Body display="flex" flexDirection="column" gap="4" py="3" px="3">
+                <Sidebar onNavigate={() => setOpen(false)} />
               </Drawer.Body>
               <Drawer.CloseTrigger asChild>
                 <CloseButton size="sm" />
@@ -150,36 +232,36 @@ export function Layout() {
       </Drawer.Root>
 
       <Flex direction="column" flex="1" minW="0">
-        <Flex
-          as="header"
-          h="14"
-          px={{ base: "3", md: "6" }}
-          align="center"
-          gap="3"
-          borderBottomWidth="1px"
-          bg="surface"
-          position="sticky"
-          top="0"
-          zIndex="docked"
-        >
+        <Flex as="header" h="14" flexShrink={0} ps={{ base: "2", lg: "3" }} pe={{ base: "2", lg: "3" }} align="center" gap="2">
           <IconButton aria-label="Open menu" variant="ghost" size="sm" display={{ lg: "none" }} onClick={() => setOpen(true)}>
             <LuMenu />
           </IconButton>
-          <chakra.form
-            w={{ base: "full", md: "96" }}
-            role="search"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const q = search.trim()
-              if (q) navigate(`/vulnerabilities?q=${encodeURIComponent(q)}`)
-              setSearch("")
-            }}
-          >
-            <InputGroup startElement={<LuSearch />} endElement={<Kbd size="sm">↵</Kbd>}>
-              <Input size="sm" value={search} onChange={(e) => setSearch(e.currentTarget.value)} placeholder="Search CVE, package, host…" aria-label="Search vulnerabilities" />
-            </InputGroup>
-          </chakra.form>
+          <Heading as="h1" size="lg" letterSpacing="-0.01em" truncate ps={{ lg: "2" }}>
+            {title}
+          </Heading>
           <HStack ms="auto" gap="1">
+            <chakra.form
+              display={{ base: "none", md: "block" }}
+              w="80"
+              me="1"
+              role="search"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const q = search.trim()
+                if (q) navigate(`/vulnerabilities?q=${encodeURIComponent(q)}`)
+                setSearch("")
+              }}
+            >
+              <InputGroup startElement={<LuSearch />} endElement={<Kbd size="sm">↵</Kbd>}>
+                <Input size="sm" bg="surface" value={search} onChange={(e) => setSearch(e.currentTarget.value)} placeholder="Search CVE, package, host…" aria-label="Search vulnerabilities" />
+              </InputGroup>
+            </chakra.form>
+            {/* No room for the field on a phone: the Vulnerabilities page starts with its own search box. */}
+            <IconButton asChild aria-label="Search vulnerabilities" variant="ghost" size="sm" display={{ md: "none" }}>
+              <Link to="/vulnerabilities">
+                <LuSearch />
+              </Link>
+            </IconButton>
             <ColorModeButton />
             {me?.auth_enabled && (
               <Tooltip content="Sign out">
@@ -190,8 +272,22 @@ export function Layout() {
             )}
           </HStack>
         </Flex>
-        <Box as="main" flex="1" px={{ base: "3", md: "6", xl: "8" }} py="6" maxW="1600px" w="full" mx="auto" aria-busy={navigating}>
-          <Box opacity={navigating ? 0.6 : 1} transition="opacity 0.15s">
+        {/* The content sheet: the one raised surface on the canvas, and the scroll container. */}
+        <Box
+          as="main"
+          ref={main}
+          flex="1"
+          minH="0"
+          overflowY="auto"
+          bg="surface"
+          borderWidth="1px"
+          rounded="sheet"
+          ms={{ base: "2", lg: "0" }}
+          me={{ base: "2", lg: "3" }}
+          mb={{ base: "2", lg: "3" }}
+          aria-busy={navigating}
+        >
+          <Box px={{ base: "3", md: "6" }} py={{ base: "4", md: "6" }} maxW="1600px" mx="auto" opacity={navigating ? 0.6 : 1} transition="opacity 0.15s">
             <Outlet />
           </Box>
         </Box>

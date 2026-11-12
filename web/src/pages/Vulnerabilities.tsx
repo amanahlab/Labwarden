@@ -80,7 +80,6 @@ export function VulnerabilitiesPage() {
   return (
     <>
       <PageHeader
-        title="Vulnerabilities"
         description="Every vulnerability Grype reported in the latest scan of each target."
         actions={
           <Button asChild size="sm" variant="outline" bg="surface">

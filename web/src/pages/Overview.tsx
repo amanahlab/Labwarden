@@ -61,7 +61,6 @@ export function OverviewPage() {
   if (s.hosts === 0)
     return (
       <>
-        <PageHeader title="Overview" />
         <Card.Root variant="outline" bg="surface">
           <Card.Body>
             <Empty
@@ -87,7 +86,6 @@ export function OverviewPage() {
   return (
     <>
       <PageHeader
-        title="Overview"
         description={
           <>
             Active findings across {num(s.hosts)} hosts and {num(s.targets)} scan targets · last report {ago(s.last_scan)}

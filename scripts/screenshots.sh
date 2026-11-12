@@ -4,6 +4,8 @@
 # Usage: scripts/screenshots.sh [name] [routes]
 #   name    folder under screenshots/ (default: current), e.g. before, after
 #   routes  comma-separated subset, e.g. overview,hosts (default: all)
+# LABWARDEN_SHOTS_WIDTHS (default 1600,1024,390) and LABWARDEN_SHOTS_SCHEMES
+# (default light,dark) narrow a run further.
 #
 # The working tree is built as labwarden:shots and served with no network, no
 # scheduler and no login, from a throwaway COPY of the findings in the dev
@@ -59,4 +61,5 @@ docker run --rm --network "container:$VIEW" --ipc=host \
   --user "$(id -u):$(id -g)" -e HOME=/tmp \
   -v labwarden-playwright:/pw:ro -e NODE_PATH=/pw/node_modules \
   -v "$ROOT/scripts/screenshots.cjs:/screenshots.cjs:ro" -v "$OUT:/out" \
-  -e ROUTES="$ROUTES" "$PW_IMAGE" node /screenshots.cjs
+  -e ROUTES="$ROUTES" -e WIDTHS="${LABWARDEN_SHOTS_WIDTHS:-}" -e SCHEMES="${LABWARDEN_SHOTS_SCHEMES:-}" \
+  "$PW_IMAGE" node /screenshots.cjs

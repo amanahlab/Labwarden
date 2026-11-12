@@ -47,7 +47,7 @@ export function HostsPage() {
 
   return (
     <>
-      <PageHeader title="Hosts" description="Machines and images reporting to LabWarden, with their latest scan results." />
+      <PageHeader description="Machines and images reporting to LabWarden, with their latest scan results." />
       <Stack gap="3" mb="4">
         <HStack gap="2" wrap="wrap">
           <SegmentGroup.Root size="sm" value={view} onValueChange={(e) => ps.set({ view: e.value })} bg="surface">

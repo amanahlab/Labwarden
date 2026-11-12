@@ -44,7 +44,7 @@ const agentImage = import.meta.env.VITE_AGENT_IMAGE || "ghcr.io/amanahlab/labwar
 export function SettingsPage() {
   return (
     <>
-      <PageHeader title="Settings" description="Connect hosts, manage enrollment tokens and schedule central registry scans." />
+      <PageHeader description="Connect hosts, manage enrollment tokens and schedule central registry scans." />
       <Stack gap="6">
         {plainHTTP && (
           <Alert.Root status="warning">
