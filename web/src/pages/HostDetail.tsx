@@ -6,7 +6,6 @@ import {
   Breadcrumb,
   Button,
   Card,
-  CloseButton,
   DataList,
   Dialog,
   Field,
@@ -27,6 +26,7 @@ import { LuKeyRound, LuPencil, LuTrash2 } from "react-icons/lu"
 import { api, type EventRow, type FindingRow, type HostRow, type List, type ScanRow, type TargetRow } from "@/lib/api"
 import { ago, dateTime, interval, num } from "@/lib/format"
 import { useParamsState } from "@/lib/useParamsState"
+import { useSheet } from "@/lib/useSheet"
 import { DataTable, ErrorBox, FilterBar, Header, HostStatusBadge, Pager, Panel, SearchInput, Select, SeverityCounts } from "@/components/common"
 import { ClearFilters, KevToggle, SeverityChips } from "@/components/filters"
 import { FindingTable } from "@/pages/Vulnerabilities"
@@ -34,6 +34,7 @@ import { KindTag } from "@/components/KindTag"
 import { FIX_OPTIONS, STATUS_OPTIONS } from "@/lib/options"
 import { EventTable, ScanTable } from "@/components/tables"
 import { SeverityDonut } from "@/components/charts"
+import { Sheet, SheetBody, SheetFooter } from "@/components/Sheet"
 import { toaster } from "@/components/ui/toaster"
 
 interface HostResponse {
@@ -260,8 +261,21 @@ function HostLogs({ host, ps }: { host: string; ps: PS }) {
 }
 
 function EditHost({ host }: { host: HostRow }) {
+  const sheet = useSheet("edit")
+  return (
+    <>
+      <Button size="sm" variant="outline" bg="surface" onClick={sheet.show}>
+        <LuPencil /> Edit
+      </Button>
+      <Sheet open={sheet.open} onClose={sheet.hide} title={`Edit ${host.name}`} description="The name, kind and address come from the agent. The group and the notes are yours.">
+        <EditHostForm host={host} onDone={sheet.hide} />
+      </Sheet>
+    </>
+  )
+}
+
+function EditHostForm({ host, onDone }: { host: HostRow; onDone: () => void }) {
   const qc = useQueryClient()
-  const [open, setOpen] = useState(false)
   const [group, setGroup] = useState(host.group)
   const [notes, setNotes] = useState(host.notes)
   const save = useMutation({
@@ -269,61 +283,44 @@ function EditHost({ host }: { host: HostRow }) {
     onSuccess: () => {
       toaster.create({ type: "success", title: "Host updated" })
       qc.invalidateQueries()
-      setOpen(false)
+      onDone()
     },
     onError: (e) => toaster.create({ type: "error", title: "Update failed", description: (e as Error).message }),
   })
+  const changed = group !== host.group || notes !== host.notes
   return (
-    <Dialog.Root
-      open={open}
-      onOpenChange={(e) => {
-        setOpen(e.open)
-        if (e.open) {
-          setGroup(host.group)
-          setNotes(host.notes)
-        }
-      }}
-    >
-      <Dialog.Trigger asChild>
-        <Button size="sm" variant="outline" bg="surface">
-          <LuPencil /> Edit
+    <>
+      <SheetBody>
+        <Stack
+          as="form"
+          id="edit-host"
+          gap="4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (group.trim()) save.mutate()
+          }}
+        >
+          <Field.Root required>
+            <Field.Label>Group</Field.Label>
+            <Input value={group} maxLength={64} onChange={(e) => setGroup(e.currentTarget.value)} />
+            <Field.HelperText>Overrides the group the agent reported on first contact.</Field.HelperText>
+          </Field.Root>
+          <Field.Root>
+            <Field.Label>Notes</Field.Label>
+            <Textarea rows={8} value={notes} maxLength={2000} onChange={(e) => setNotes(e.currentTarget.value)} />
+            <Field.HelperText>Owner, purpose, patch window.</Field.HelperText>
+          </Field.Root>
+        </Stack>
+      </SheetBody>
+      <SheetFooter summary={changed ? "Unsaved changes" : "No changes"}>
+        <Button size="sm" variant="outline" onClick={onDone}>
+          Cancel
         </Button>
-      </Dialog.Trigger>
-      <Portal>
-        <Dialog.Backdrop />
-        <Dialog.Positioner>
-          <Dialog.Content>
-            <Dialog.Header>
-              <Dialog.Title>Edit {host.name}</Dialog.Title>
-            </Dialog.Header>
-            <Dialog.Body>
-              <Stack gap="4">
-                <Field.Root>
-                  <Field.Label>Group</Field.Label>
-                  <Input value={group} maxLength={64} onChange={(e) => setGroup(e.currentTarget.value)} />
-                  <Field.HelperText>Overrides the group the agent reported on first contact.</Field.HelperText>
-                </Field.Root>
-                <Field.Root>
-                  <Field.Label>Notes</Field.Label>
-                  <Textarea rows={4} value={notes} maxLength={2000} onChange={(e) => setNotes(e.currentTarget.value)} />
-                </Field.Root>
-              </Stack>
-            </Dialog.Body>
-            <Dialog.Footer>
-              <Dialog.ActionTrigger asChild>
-                <Button variant="outline">Cancel</Button>
-              </Dialog.ActionTrigger>
-              <Button onClick={() => save.mutate()} loading={save.isPending} disabled={!group.trim()}>
-                Save
-              </Button>
-            </Dialog.Footer>
-            <Dialog.CloseTrigger asChild>
-              <CloseButton size="sm" />
-            </Dialog.CloseTrigger>
-          </Dialog.Content>
-        </Dialog.Positioner>
-      </Portal>
-    </Dialog.Root>
+        <Button size="sm" type="submit" form="edit-host" loading={save.isPending} disabled={!group.trim() || !changed}>
+          Save
+        </Button>
+      </SheetFooter>
+    </>
   )
 }
 

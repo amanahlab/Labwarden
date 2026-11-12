@@ -3,15 +3,14 @@ import { Link, useParams } from "react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Badge,
-  Box,
   Breadcrumb,
   Button,
-  Code,
   DataList,
   Field,
   Grid,
   HStack,
   Heading,
+  RadioCard,
   Link as CLink,
   Skeleton,
   Stack,
@@ -20,10 +19,12 @@ import {
   Textarea,
   Wrap,
 } from "@chakra-ui/react"
-import { LuExternalLink } from "react-icons/lu"
+import { LuExternalLink, LuPencil } from "react-icons/lu"
 import { api, TRIAGE_STATUSES, type FindingRow, type TriageStatus, type VulnDetail } from "@/lib/api"
 import { ago, dateTime, pct, splitList, statusLabel } from "@/lib/format"
 import { DataTable, ErrorBox, FixBadge, Header, KevBadge, Mono, Panel, Select, SeverityBadge, TriageBadge } from "@/components/common"
+import { Sheet, SheetBody, SheetFooter } from "@/components/Sheet"
+import { useSheet } from "@/lib/useSheet"
 import { toaster } from "@/components/ui/toaster"
 
 interface VulnResponse {
@@ -265,7 +266,40 @@ export function VulnDetailPage() {
   )
 }
 
+// The current triage, read-only; changing it happens in a sheet.
 function TriagePanel({ v, affected }: { v: VulnDetail; affected: FindingRow[] }) {
+  const sheet = useSheet("triage")
+  return (
+    <Panel
+      title="Triage"
+      subtitle="Applies to every host, unless a host has its own"
+      actions={
+        <Button size="sm" variant="outline" flexShrink={0} onClick={sheet.show}>
+          <LuPencil /> Triage
+        </Button>
+      }
+    >
+      <Stack gap="2">
+        <HStack gap="2" wrap="wrap">
+          <TriageBadge status={v.status} />
+          <Text textStyle="sm" color="fg.muted">
+            {TRIAGE_HELP[v.status]}
+          </Text>
+        </HStack>
+        {v.note && (
+          <Text textStyle="sm" whiteSpace="pre-wrap">
+            {v.note}
+          </Text>
+        )}
+      </Stack>
+      <Sheet open={sheet.open} onClose={sheet.hide} title={`Triage ${v.id}`} description="Decide for every host at once, or override the decision for a single host.">
+        <TriageForm v={v} affected={affected} onDone={sheet.hide} />
+      </Sheet>
+    </Panel>
+  )
+}
+
+function TriageForm({ v, affected, onDone }: { v: VulnDetail; affected: FindingRow[]; onDone: () => void }) {
   const qc = useQueryClient()
   const [scope, setScope] = useState("0")
   const [status, setStatus] = useState<TriageStatus>(v.status)
@@ -292,43 +326,63 @@ function TriagePanel({ v, affected }: { v: VulnDetail; affected: FindingRow[] })
     onSuccess: () => {
       toaster.create({ type: "success", title: `${v.id} marked ${statusLabel(status).toLowerCase()}` })
       qc.invalidateQueries()
+      onDone()
     },
     onError: (e) => toaster.create({ type: "error", title: "Could not save triage", description: (e as Error).message }),
   })
+  const scopeLabel = scope === "0" ? "All hosts" : (hosts.find(([id]) => String(id) === scope)?.[1] ?? "One host")
 
   return (
-    <Panel title="Triage" subtitle="Applies to every host, or override it for a single host">
-      <Stack gap="3">
-        <Field.Root>
-          <Field.Label>Scope</Field.Label>
-          <Select
-            label="Scope"
-            w="full"
-            value={scope}
-            onChange={changeScope}
-            options={[["0", "All hosts"], ...hosts.map(([id, name]) => [String(id), `Only ${name}`] as [string, string])]}
-          />
-        </Field.Root>
-        <Field.Root>
-          <Field.Label>Status</Field.Label>
-          <Select label="Status" w="full" value={status} onChange={(s) => setStatus(s as TriageStatus)} options={TRIAGE_STATUSES.map((s) => [s, statusLabel(s)])} />
-          <Field.HelperText>{TRIAGE_HELP[status]}</Field.HelperText>
-        </Field.Root>
-        <Field.Root>
-          <Field.Label>Note</Field.Label>
-          <Textarea size="sm" rows={3} value={note} onChange={(e) => setNote(e.currentTarget.value)} placeholder="Why, ticket link, mitigation…" maxLength={2000} />
-        </Field.Root>
-        <Box>
-          <Button size="sm" onClick={() => save.mutate()} loading={save.isPending}>
-            Save triage
-          </Button>
-        </Box>
-        {v.note && scope === "0" && (
-          <Text textStyle="xs" color="fg.muted">
-            Current note: <Code size="sm">{v.note}</Code>
+    <>
+      <SheetBody>
+        <Stack gap="5">
+          <Field.Root>
+            <Field.Label>Scope</Field.Label>
+            <Select
+              label="Scope"
+              w="full"
+              value={scope}
+              onChange={changeScope}
+              options={[["0", "All hosts"], ...hosts.map(([id, name]) => [String(id), `Only ${name}`] as [string, string])]}
+            />
+          </Field.Root>
+          <RadioCard.Root value={status} onValueChange={(e) => e.value && setStatus(e.value as TriageStatus)} variant="outline" size="sm">
+            <RadioCard.Label>Status</RadioCard.Label>
+            <Stack gap="2">
+              {TRIAGE_STATUSES.map((s) => (
+                <RadioCard.Item key={s} value={s} _checked={{ bg: "bg.muted" }}>
+                  <RadioCard.ItemHiddenInput />
+                  <RadioCard.ItemControl>
+                    <RadioCard.ItemContent>
+                      <RadioCard.ItemText>{statusLabel(s)}</RadioCard.ItemText>
+                      <RadioCard.ItemDescription>{TRIAGE_HELP[s]}</RadioCard.ItemDescription>
+                    </RadioCard.ItemContent>
+                    <RadioCard.ItemIndicator />
+                  </RadioCard.ItemControl>
+                </RadioCard.Item>
+              ))}
+            </Stack>
+          </RadioCard.Root>
+          <Field.Root>
+            <Field.Label>Note</Field.Label>
+            <Textarea rows={5} value={note} onChange={(e) => setNote(e.currentTarget.value)} placeholder="Why, ticket link, mitigation…" maxLength={2000} />
+          </Field.Root>
+        </Stack>
+      </SheetBody>
+      <SheetFooter
+        summary={
+          <Text truncate>
+            {scopeLabel} · {statusLabel(status)}
           </Text>
-        )}
-      </Stack>
-    </Panel>
+        }
+      >
+        <Button size="sm" variant="outline" onClick={onDone}>
+          Cancel
+        </Button>
+        <Button size="sm" onClick={() => save.mutate()} loading={save.isPending}>
+          Save triage
+        </Button>
+      </SheetFooter>
+    </>
   )
 }
