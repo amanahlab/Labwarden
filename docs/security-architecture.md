@@ -135,6 +135,7 @@ The dashboard runs as an unprivileged user (uid 10001).
 ## Keeping dependencies honest
 
 - **Pinned images.** The dashboard image comes from GitHub's container registry (`ghcr.io/amanahlab/labwarden`), and `docker-compose.yml` pins it by tag *and* by digest. Every other image LabWarden ships or runs (the agent image, base and tool images, and the socket proxy) is pinned the same way, so a tag that is later changed upstream cannot sneak in different code.
+- **Signed builds.** From v0.2.1, each release signs a build provenance attestation for the dashboard and agent images, tying each image digest to this repository's release workflow. The release page lists the digests. With the GitHub CLI, `gh attestation verify oci://ghcr.io/amanahlab/labwarden@sha256:<digest> --repo amanahlab/Labwarden` confirms an image was built here (the same works for `labwarden-agent`).
 - **Pinned tools.** Grype and Syft versions are pinned and updated together on purpose, along with Syft's checksums in the installer.
 - **Automatic checks.** Every test run, including CI, checks the Go code with `govulncheck` and the web dependencies with `npm audit`.
 

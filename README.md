@@ -162,7 +162,11 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md). For a plain-l
 
 **Docker.** Access to the Docker socket is root on that host, even when it is mounted `:ro`. Prefer a socket proxy that allows only `GET` on containers and images, such as `tecnativa/docker-socket-proxy` with `CONTAINERS=1 IMAGES=1 POST=0`, and point the agent at it with `LABWARDEN_DOCKER_URL` (see the Compose snippet in Settings). The shipped `docker-compose.yml` runs the dashboard with a read-only root filesystem, no capabilities and `no-new-privileges`. The testbed's Docker agent in `docker-compose.dev.yml` runs the same way, except that it keeps `DAC_OVERRIDE` to unpack container filesystems. The VM agent's systemd unit is sandboxed the same way.
 
-**Supply chain.** The dashboard image comes from GHCR (`ghcr.io/amanahlab/labwarden`), and `docker-compose.yml` pins it by tag and multi-arch index digest. The other images LabWarden ships and runs (the agent image, base and tool images, and the socket proxy) are pinned by tag and digest too; the build-and-test containers in `scripts/` are pinned by tag. `scripts/test.sh` runs `govulncheck` and `npm audit` for production dependencies. Each week, `.github/workflows/image-scan.yml` scans the published images with the same pinned Grype and lists fixable findings in the repository's Security tab.
+**Supply chain.** The dashboard image comes from GHCR (`ghcr.io/amanahlab/labwarden`), and `docker-compose.yml` pins it by tag and multi-arch index digest. The other images LabWarden ships and runs (the agent image, base and tool images, and the socket proxy) are pinned by tag and digest too; the build-and-test containers in `scripts/` are pinned by tag. `scripts/test.sh` runs `govulncheck` and `npm audit` for production dependencies. Each week, `.github/workflows/image-scan.yml` scans the published images with the same pinned Grype and lists fixable findings in the repository's Security tab. From v0.2.1, each release signs a build provenance attestation for both images, and its [GitHub Release](https://github.com/amanahlab/Labwarden/releases) lists their digests. Check an image before you pin it:
+
+```sh
+gh attestation verify oci://ghcr.io/amanahlab/labwarden@sha256:<digest> --repo amanahlab/Labwarden
+```
 
 **Upgrading to the hardened release** breaks compatibility: the admin password needs at least 12 characters, and every agent must be re-installed (see Installing agents).
 
