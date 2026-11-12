@@ -555,9 +555,41 @@ function SystemPanel() {
               <NotifyStatus n={s.notify} />
             </DataList.ItemValue>
           </DataList.Item>
+          <DataList.Item>
+            <DataList.ItemLabel>Image updates</DataList.ItemLabel>
+            <DataList.ItemValue>
+              <ImageCheckStatus c={s.image_check} pending={s.queue.image_checks} />
+            </DataList.ItemValue>
+          </DataList.Item>
         </DataList.Root>
       )}
     </Panel>
+  )
+}
+
+// Which registries the server may ask about running images, and which of
+// them it has credentials for (host names only).
+function ImageCheckStatus({ c, pending }: { c: SystemInfo["image_check"]; pending: number }) {
+  if (!c.enabled)
+    return (
+      <Text color="fg.muted">
+        Off (<Code size="sm">LABWARDEN_IMAGE_CHECK=false</Code>): running images are not compared with their registries.
+      </Text>
+    )
+  const every = c.interval_hours % 24 === 0 ? `${c.interval_hours / 24} d` : `${c.interval_hours} h`
+  return (
+    <Stack gap="0">
+      <Text>
+        Every {every} · last check {ago(c.last_checked)}
+        {pending > 0 && ` · ${pending} pending`}
+      </Text>
+      <Text textStyle="xs" color="fg.muted">
+        Registries: {c.registries.join(", ")}
+      </Text>
+      <Text textStyle="xs" color="fg.muted">
+        With credentials: {c.with_credentials.length ? c.with_credentials.join(", ") : "none"}
+      </Text>
+    </Stack>
   )
 }
 
