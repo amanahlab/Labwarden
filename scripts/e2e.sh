@@ -135,9 +135,10 @@ got=$(api "$URL/api/v1/findings?q=log4j-core&status=all&size=1&${row#* }" | jqr 
 pass "a location row drills down to its $want findings"
 
 echo "== running images"
-# The testbed workload is a local build: listed with its host, nothing to compare upstream.
+# The testbed workload is listed with its host and container. Its status is not
+# asserted: with the containerd image store even a local build has a repo digest.
 api "$URL/api/v1/images?q=testbed-workload" | jqr -e \
-  '[.items[] | select(.name == "labwarden-testbed-workload" and .status == "local" and (.hosts | any(.name == "testbed-docker")))] | length == 1' >/dev/null ||
+  '[.items[] | select(.name == "labwarden-testbed-workload" and (.hosts | any(.name == "testbed-docker" and (.containers | length) > 0)))] | length == 1' >/dev/null ||
   fail "the testbed workload container is missing from the Images page"
 pass "running containers reach the Images page"
 

@@ -17,7 +17,7 @@ A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog t
 - **Vulnerabilities**: one row per CVE/GHSA, per package instance, per host or per package location (path on a target), each drilling down to its package instances. Search, sort, filter by severity, KEV, fix state, triage status, group and ecosystem. Paginated, with CSV export.
 - **Vulnerability detail**: description, references, CVSS, EPSS, risk, CWEs, affected packages, and triage (acknowledge, ignore, or mark as a false positive, globally or for one host).
 - **Hosts**: health (healthy, stale, failing), grouped by group or kind, plus per-host findings, targets, scan history and logs.
-- **Images**: every running Docker container's image across hosts, grouped by repository, tag and digest, with its build date and the containers that run it. Local builds and digest-pinned images are marked.
+- **Images**: every running Docker container's image across hosts, grouped by repository, tag and digest, with its build date and the containers that run it. Digest-pinned images and images with no registry digest (local builds on the classic image store) are marked.
 - **Scans and Logs**: every report received, and every agent run, warning and error. Logs have a live tail.
 - **Add host**: three steps from any page (kind, enrollment token, install commands), and it notices when the host enrolls.
 - **Settings**: enrollment tokens, enrolled hosts, agent install snippets, central registry scans and system status.
