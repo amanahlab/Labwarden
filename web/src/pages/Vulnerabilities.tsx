@@ -111,8 +111,8 @@ export function VulnerabilitiesPage() {
         <SearchInput value={filters.q} onChange={(v) => ps.set({ q: v })} placeholder="CVE / GHSA, package, host, description…" w={{ base: "full", md: "96" }} />
       </Toolbar>
       <FilterBar>
-        <SeverityChips value={filters.severity} onChange={(v) => ps.set({ severity: v })} />
         <KevToggle value={filters.kev} onChange={(v) => ps.set({ kev: v ? "true" : null })} />
+        <SeverityChips value={filters.severity} onChange={(v) => ps.set({ severity: v })} />
         <Select label="Fix state" value={filters.fix} onChange={(v) => ps.set({ fix: v })} options={FIX_OPTIONS} placeholder="Any fix state" w="36" />
         <Select label="Triage status" value={filters.status} onChange={(v) => ps.set({ status: v })} options={STATUS_OPTIONS} w="52" />
         <Select label="Group" value={filters.group} onChange={(v) => ps.set({ group: v })} options={(groups.data ?? []).map((g) => g.name)} placeholder="All groups" w="36" />
