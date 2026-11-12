@@ -106,6 +106,17 @@ EOT
 chmod +x "$WORK/bin/docker"
 want='[{"container":"/c1","ref":"nginx:1.27","image_id":"sha256:c1","repo_digests":["nginx@sha256:d"],"created":"2026-03-01T10:00:00Z"},{"container":"/c2","ref":"nginx:1.27","image_id":"sha256:c2","repo_digests":[],"created":""}]'
 check "docker_inventory lists every container" 0 test "$(PATH="$WORK/bin" docker_inventory)" = "$want"
+# A container that cannot be inspected (Docker restarting) fails the whole
+# list, so the dashboard keeps the last one instead of dropping containers.
+mkdir "$WORK/bad"
+cat >"$WORK/bad/docker" <<EOT
+#!/bin/sh
+[ "\$1" = inspect ] && [ "\$4" = c2 ] && exit 1
+exec "$WORK/bin/docker" "\$@"
+EOT
+chmod +x "$WORK/bad/docker"
+check "docker_inventory fails when a container cannot be inspected" 1 env PATH="$WORK/bad" /bin/sh -c "WORK=$WORK; $(sed -n '/^docker_inventory()/,/^}/p' agent/labwarden-agent.sh)
+docker_inventory"
 check "docker_inventory fails without docker or jq" 1 sh -c "PATH=/nonexistent; $(sed -n '/^docker_inventory()/,/^}/p' agent/labwarden-agent.sh)
 docker_inventory"
 rm -rf "$WORK"
