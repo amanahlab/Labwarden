@@ -223,7 +223,8 @@ export function StatCard(props: { label: string; to: string; value: ReactNode; u
 }
 
 const TRIAGE: Record<TriageStatus, { palette: string; icon: ReactNode }> = {
-  open: { palette: "orange", icon: <LuCircleAlert /> },
+  // Yellow, not orange: orange on screen is the KEV diamond and nothing else.
+  open: { palette: "yellow", icon: <LuCircleAlert /> },
   acknowledged: { palette: "blue", icon: <LuEye /> },
   ignored: { palette: "gray", icon: <LuEyeOff /> },
   false_positive: { palette: "gray", icon: <LuBan /> },
@@ -540,13 +541,14 @@ export function DataTable({ children, minW = "4xl", size = "sm" }: { children: R
 // both colour modes, like a terminal.
 export function CodeBlock({ code }: { code: string }) {
   return (
-    <Box position="relative" bg="gray.900" color="gray.100" rounded="l2" p="4" pe="12" overflowX="auto">
-      <Text as="pre" fontFamily="mono" textStyle="xs" whiteSpace="pre">
+    <Box position="relative" bg="gray.900" color="gray.100" rounded="l2" overflow="hidden">
+      {/* The pre scrolls, so the copy button stays in its corner; its own ground keeps long lines from showing through. */}
+      <Text as="pre" fontFamily="mono" textStyle="xs" whiteSpace="pre" p="4" pe="12" overflowX="auto">
         {code}
       </Text>
       <Clipboard.Root value={code} position="absolute" top="2" right="2">
         <Clipboard.Trigger asChild>
-          <IconButton size="xs" variant="ghost" color="gray.300" _hover={{ bg: "gray.700" }} aria-label="Copy">
+          <IconButton size="xs" variant="ghost" bg="gray.900" color="gray.300" _hover={{ bg: "gray.700" }} aria-label="Copy">
             <Clipboard.Indicator />
           </IconButton>
         </Clipboard.Trigger>

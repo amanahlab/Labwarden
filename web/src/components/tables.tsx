@@ -61,7 +61,7 @@ export function ScanTable({ data, loading, hideHost }: { data?: List<ScanRow>; l
             <Table.Cell>
               <HStack gap="1">
                 {s.new > 0 && (
-                  <Badge colorPalette="orange" variant="subtle" size="sm">
+                  <Badge colorPalette="yellow" variant="subtle" size="sm">
                     +{s.new} new
                   </Badge>
                 )}

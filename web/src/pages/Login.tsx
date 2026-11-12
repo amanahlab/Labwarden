@@ -26,7 +26,7 @@ export function LoginPage() {
 
   return (
     <Center minH="100vh" p="4" bg="canvas">
-      <Card.Root w="full" maxW="sm" variant="elevated" bg="surface">
+      <Card.Root w="full" maxW="sm" variant="outline" bg="surface">
         <Card.Body>
           <form onSubmit={submit}>
             <Stack gap="6">
