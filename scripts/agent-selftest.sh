@@ -82,6 +82,34 @@ printf 'PRETTY_NAME="$(id)"\n' >/etc/os-release
 check "host_os never runs os-release" 0 test "$(host_os)" = '$(id)'
 cp /tmp/os-release.orig /etc/os-release
 
+# docker_inventory over the docker CLI (no jq): every container, even two on
+# one image, and an image that cannot be inspected still lists its container.
+eval "$(sed -n '/^docker_inventory()/,/^}/p' agent/labwarden-agent.sh)"
+WORK=$(mktemp -d)
+export LABWARDEN_DOCKER_LABEL=''
+mkdir "$WORK/bin"
+cat >"$WORK/bin/docker" <<'EOT'
+#!/bin/sh
+case "$1 $2" in
+"ps -q") printf 'c1\nc2\n' ;;
+"inspect --format")
+	case "$3" in
+	*container*) printf '"container":"/%s","ref":"nginx:1.27","image_id":"sha256:%s"' "$4" "$4" ;;
+	*) printf 'sha256:%s\n' "$4" ;;
+	esac ;;
+"image inspect")
+	[ "$5" = sha256:c1 ] || exit 1
+	printf '"repo_digests":["nginx@sha256:d"],"created":"2026-03-01T10:00:00Z"' ;;
+*) exit 1 ;;
+esac
+EOT
+chmod +x "$WORK/bin/docker"
+want='[{"container":"/c1","ref":"nginx:1.27","image_id":"sha256:c1","repo_digests":["nginx@sha256:d"],"created":"2026-03-01T10:00:00Z"},{"container":"/c2","ref":"nginx:1.27","image_id":"sha256:c2","repo_digests":[],"created":""}]'
+check "docker_inventory lists every container" 0 test "$(PATH="$WORK/bin" docker_inventory)" = "$want"
+check "docker_inventory fails without docker or jq" 1 sh -c "PATH=/nonexistent; $(sed -n '/^docker_inventory()/,/^}/p' agent/labwarden-agent.sh)
+docker_inventory"
+rm -rf "$WORK"
+
 # A restarted container often hands the new run the pid of the run that was
 # killed holding the lock; exec keeps $$, so the lock names the agent itself.
 check "a lock holding the agent's own pid is stale" 0 sh -c '

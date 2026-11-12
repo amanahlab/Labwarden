@@ -115,6 +115,8 @@ func (s *Server) Handler() http.Handler {
 			r.Patch("/hosts/{id}", s.updateHost)
 			r.Delete("/hosts/{id}", s.deleteHost)
 			r.Delete("/hosts/{id}/credential", s.resetCredential)
+			r.Get("/images", s.listImages)
+			r.Get("/images/registries", s.listImageRegistries)
 			r.Get("/groups", s.listGroups)
 			r.Get("/scans", s.listScans)
 			r.Get("/events", s.listEvents)

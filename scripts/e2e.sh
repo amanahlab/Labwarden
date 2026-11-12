@@ -134,6 +134,13 @@ got=$(api "$URL/api/v1/findings?q=log4j-core&status=all&size=1&${row#* }" | jqr 
 { [ "$want" -gt 0 ] && [ "$got" = "$want" ]; } 2>/dev/null || fail "location drill-down: $got findings, row says $want"
 pass "a location row drills down to its $want findings"
 
+echo "== running images"
+# The testbed workload is a local build: listed with its host, nothing to compare upstream.
+api "$URL/api/v1/images?q=testbed-workload" | jqr -e \
+  '[.items[] | select(.name == "labwarden-testbed-workload" and .status == "local" and (.hosts | any(.name == "testbed-docker")))] | length == 1' >/dev/null ||
+  fail "the testbed workload container is missing from the Images page"
+pass "running containers reach the Images page"
+
 echo "== triage"
 VID=$(api "$URL/api/v1/vulnerabilities?q=CVE-2021-44228" | jqr -r '.items[0].id')
 api -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"host_id":0,"status":"acknowledged","note":"e2e"}' "$URL/api/v1/vulnerabilities/$VID/triage"

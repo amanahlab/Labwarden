@@ -17,6 +17,7 @@ A homelab vulnerability dashboard. Agents on your VMs and Docker hosts catalog t
 - **Vulnerabilities**: one row per CVE/GHSA, per package instance, per host or per package location (path on a target), each drilling down to its package instances. Search, sort, filter by severity, KEV, fix state, triage status, group and ecosystem. Paginated, with CSV export.
 - **Vulnerability detail**: description, references, CVSS, EPSS, risk, CWEs, affected packages, and triage (acknowledge, ignore, or mark as a false positive, globally or for one host).
 - **Hosts**: health (healthy, stale, failing), grouped by group or kind, plus per-host findings, targets, scan history and logs.
+- **Images**: every running Docker container's image across hosts, grouped by repository, tag and digest, with its build date and the containers that run it. Local builds and digest-pinned images are marked.
 - **Scans and Logs**: every report received, and every agent run, warning and error. Logs have a live tail.
 - **Add host**: three steps from any page (kind, enrollment token, install commands), and it notices when the host enrolls.
 - **Settings**: enrollment tokens, enrolled hosts, agent install snippets, central registry scans and system status.
@@ -76,6 +77,7 @@ Settings are optional. They go in a `.env` file next to `docker-compose.yml`; [`
    The server keeps the latest SBOM of every target, i.e. each host's full package list.
 3. Warnings and errors go to `POST /api/v1/ingest/event` and show up under **Logs**. These include Syft failures and uploads that never arrive.
 4. `POST /api/v1/ingest/run` with `status=ok|error` closes the run with the list of targets. On a successful run, targets the agent no longer reports (for example a removed container) are **retired** from the dashboard.
+   On a Docker host (agent 3.1 or later) this call also carries `images`: one entry per running container, `{container, ref, image_id, repo_digests, created}`, taken from the Docker API (`ref` is the container's `Config.Image`). It is the complete list for the host and replaces what the **Images** page showed for it; a call without `images` leaves the list alone, and `[]` means nothing runs. At most 1000 entries (more gets `400`); an entry with a bad name, reference or image ID is dropped with a warning in **Logs**. A dashboard older than the agent answers `400` to the unknown field, and the agent then reports the run once more without it, so upgrade the server first.
 
 A host that misses more than 2.5× its reported interval is marked **stale**. A host whose last run ended in error is marked **failing**. All agent requests use `Authorization: Bearer <credential>`, and a credential speaks only for its own host: a request that names another host gets `403`. Enrollment tokens are created in Settings with an expiry (1 hour, 24 hours, 7 days or never) and an optional limit on uses; they can only enroll. Tokens and credentials are stored only as SHA-256 hashes. Repeated bad tokens from one address get `429`.
 

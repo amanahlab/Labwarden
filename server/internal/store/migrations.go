@@ -205,4 +205,25 @@ CREATE TABLE agent_credentials (
 );
 CREATE UNIQUE INDEX agent_credentials_active_host ON agent_credentials(host) WHERE revoked_at IS NULL;
 `,
+	// 5: the containers running on each Docker host and the image each one
+	// runs, as the agent last reported them, for the Images page.
+	`
+CREATE TABLE container_images (
+  id            INTEGER PRIMARY KEY,
+  host_id       INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+  container     TEXT NOT NULL,
+  ref           TEXT NOT NULL,                   -- what it was started from (Config.Image)
+  registry      TEXT NOT NULL DEFAULT '',        -- docker.io, ghcr.io, … ('' = started from an image ID)
+  repository    TEXT NOT NULL DEFAULT '',        -- normalised: docker.io/library/nginx
+  tag           TEXT NOT NULL DEFAULT '',        -- '' for a bare digest
+  pinned_digest TEXT NOT NULL DEFAULT '',        -- the digest of repo:tag@sha256:…
+  image_id      TEXT NOT NULL,
+  repo_digest   TEXT NOT NULL DEFAULT '',        -- digest pulled from repository ('' = local build)
+  image_created TEXT NOT NULL DEFAULT '',        -- image build time ('' = unknown)
+  first_seen    TEXT NOT NULL,
+  last_seen     TEXT NOT NULL,
+  UNIQUE(host_id, container)
+);
+CREATE INDEX container_images_repo ON container_images(repository, tag);
+`,
 }

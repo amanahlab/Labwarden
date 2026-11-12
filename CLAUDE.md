@@ -25,6 +25,7 @@ Generic rules live in `~/.claude/CLAUDE.md`. This file adds the project rules.
 | SQLite store, schema, queries | `server/internal/store` |
 | HTTP API (`/api/v1`), auth, ingest | `server/internal/api` |
 | Scanner (runs the grype binary) and the single Grype DB | `server/internal/scanner` |
+| Image references (parsed with `distribution/reference`) for the Images page | `server/internal/registry` |
 | Job queue (River on `queue.db`): SBOM matching, central scans, re-matches, DB update | `server/internal/jobs` |
 | Stored SBOM files (content-addressed, gzipped) | `server/internal/sboms` |
 | Webhook alerts for new findings | `server/internal/notify` |

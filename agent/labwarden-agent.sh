@@ -24,7 +24,7 @@
 #   LABWARDEN_SPOOL        directory for SBOMs that failed to upload (default: $LABWARDEN_STATE/spool)
 set -u
 
-AGENT_VERSION="3.0.0"
+AGENT_VERSION="3.1.0"
 
 # The configuration is sourced as shell code, so only a file that nobody else
 # can have written is trusted: owned by root (or this user), not group- or
@@ -194,12 +194,22 @@ host_ip() {
 	(hostname -I 2>/dev/null || ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1) | awk '{print $1; exit}'
 }
 
-run_status() { # run_status <started|ok|error> <message> [targets-json-array]
-	printf '{"host":%s,"kind":%s,"group":%s,"os":%s,"arch":%s,"ip":%s,"agent_version":%s,"interval":%s,"run_id":%s,"status":%s,"message":%s,"targets":%s}' \
+# run_status <started|ok|error> <message> [targets-json-array] [images-json-array]
+run_status() {
+	_imgs=""
+	[ -n "${4:-}" ] && _imgs=",\"images\":$4"
+	printf '{"host":%s,"kind":%s,"group":%s,"os":%s,"arch":%s,"ip":%s,"agent_version":%s,"interval":%s,"run_id":%s,"status":%s,"message":%s,"targets":%s%s}' \
 		"$(json_str "$LABWARDEN_HOST")" "$(json_str "$KIND")" "$(json_str "$LABWARDEN_GROUP")" "$(json_str "$(host_os)")" \
 		"$(json_str "$(uname -m)")" "$(json_str "$(host_ip)")" "$(json_str "$AGENT_VERSION")" "$LABWARDEN_INTERVAL" \
-		"$(json_str "$RUN_ID")" "$(json_str "$1")" "$(json_str "$2")" "${3:-[]}" >"$WORK/run.json"
-	_code=$(api /api/v1/ingest/run application/json "$WORK/run.json" -o /dev/null -w '%{http_code}')
+		"$(json_str "$RUN_ID")" "$(json_str "$1")" "$(json_str "$2")" "${3:-[]}" "$_imgs" >"$WORK/run.json"
+	_code=$(api /api/v1/ingest/run application/json "$WORK/run.json" -o /dev/null -w '%{http_code}') && return 0
+	# A dashboard older than this agent refuses the unknown container list.
+	if [ "$_code" = 400 ] && [ -n "$_imgs" ]; then
+		log warn "the dashboard does not accept the container list yet (upgrade it); reporting the run without it"
+		run_status "$1" "$2" "${3:-[]}"
+		return
+	fi
+	return 1
 }
 
 docker_enabled() {
@@ -242,6 +252,46 @@ docker_images() {
 		event error "docker scanning needs jq or the docker CLI"
 		return 1
 	fi | sort -u -k1,1
+}
+
+# docker_inventory: a JSON array with every running container, the image
+# reference it was started from and that image's digests and build time, for
+# the Images page. Fails (and prints nothing useful) when the containers
+# cannot be listed, so a broken listing never empties the dashboard's list.
+docker_inventory() {
+	if command -v jq >/dev/null 2>&1; then
+		_filter=""
+		[ -n "$LABWARDEN_DOCKER_LABEL" ] && _filter="?filters=$(urlenc "{\"label\":[$(json_str "$LABWARDEN_DOCKER_LABEL")]}")"
+		docker_api "/containers/json$_filter" >"$WORK/ps.json" || return 1
+		jq -r '.[].Id' "$WORK/ps.json" | while read -r _c; do
+			# Config.Image from the inspect, not the list: the list shows an
+			# image ID once the tag has moved on to a newer image.
+			docker_api "/containers/$_c/json" >"$WORK/ci.json" 2>/dev/null || continue
+			_id=$(jq -r '.Image' "$WORK/ci.json")
+			docker_api "/images/$_id/json" >"$WORK/ii.json" 2>/dev/null || echo '{}' >"$WORK/ii.json"
+			jq -c --slurpfile i "$WORK/ii.json" '{container: .Name, ref: .Config.Image, image_id: .Image,
+				repo_digests: ($i[0].RepoDigests // []), created: ($i[0].Created // "")}' "$WORK/ci.json"
+		done | jq -s -c .
+	elif command -v docker >/dev/null 2>&1; then
+		if [ -n "$LABWARDEN_DOCKER_LABEL" ]; then
+			docker ps -q --filter "label=$LABWARDEN_DOCKER_LABEL" >"$WORK/ps.txt" </dev/null || return 1
+		else
+			docker ps -q >"$WORK/ps.txt" </dev/null || return 1
+		fi
+		printf '['
+		_sep=""
+		while read -r _c; do
+			_meta=$(docker inspect --format '"container":{{json .Name}},"ref":{{json .Config.Image}},"image_id":{{json .Image}}' "$_c" </dev/null 2>/dev/null) || continue
+			_id=$(docker inspect --format '{{.Image}}' "$_c" </dev/null 2>/dev/null)
+			_img=$(docker image inspect --format '"repo_digests":{{json .RepoDigests}},"created":{{json .Created}}' "$_id" </dev/null 2>/dev/null) ||
+				_img='"repo_digests":[],"created":""'
+			printf '%s{%s,%s}' "$_sep" "$_meta" "$_img"
+			_sep=,
+		done <"$WORK/ps.txt"
+		printf ']'
+	else
+		return 1
+	fi
 }
 
 image_id_of() { # image_id_of <name>: current image ID behind a tag
@@ -450,7 +500,13 @@ main() {
 		if scan "dir:$p" "$p"; then scanned=$((scanned + 1)); else failed=$((failed + 1)); fi
 	done
 
+	images=""
 	if docker_enabled; then
+		if docker_inventory >"$WORK/inventory.json"; then
+			images=$(cat "$WORK/inventory.json")
+		else
+			log warn "could not list the running containers for the Images page"
+		fi
 		if docker_images >"$WORK/images.txt"; then
 			while read -r id cid name; do
 				[ -n "$id" ] || continue
@@ -467,11 +523,11 @@ main() {
 	msg="scanned $scanned target(s) in $(($(date +%s) - _t0))s"
 	if [ "$failed" -gt 0 ]; then
 		msg="$msg, $failed failed"
-		run_status error "$msg" "[${targets%,}]" || log error "could not report run status"
+		run_status error "$msg" "[${targets%,}]" "$images" || log error "could not report run status"
 		log error "$msg"
 		exit 1
 	fi
-	run_status ok "$msg" "[${targets%,}]" || log error "could not report run status"
+	run_status ok "$msg" "[${targets%,}]" "$images" || log error "could not report run status"
 	log info "$msg"
 }
 

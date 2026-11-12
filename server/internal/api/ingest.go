@@ -180,6 +180,9 @@ type runIn struct {
 	Status       string   `json:"status"` // started | ok | error
 	Message      string   `json:"message"`
 	Targets      []string `json:"targets"`
+	// Images lists the running containers (final call of a Docker run).
+	// nil = not sent (an older agent, or listing failed): keep what is stored.
+	Images []imageIn `json:"images"`
 }
 
 // ingestRun records the start or end of an agent run. The final call
@@ -226,10 +229,30 @@ func (s *Server) ingestRun(w http.ResponseWriter, r *http.Request) {
 		if in.Status == "error" {
 			targets = nil
 		}
+		var imgs []store.ContainerImage
+		dropped := 0
+		if in.Images != nil {
+			var err error
+			if imgs, dropped, err = containerImages(in.Images); err != nil {
+				writeErr(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
 		retired, err := s.st.CompleteRun(r.Context(), m, in.Status, targets)
 		if err != nil {
 			s.storeErr(w, r, err)
 			return
+		}
+		// Listing containers does not depend on the scans, so even a failed
+		// run reports what is running.
+		if imgs != nil {
+			if err := s.st.ReplaceHostImages(r.Context(), m.Host, imgs); err != nil {
+				s.storeErr(w, r, err)
+				return
+			}
+		}
+		if dropped > 0 {
+			s.event(r, "warn", "agent", m.Host, m.RunID, fmt.Sprintf("ignored %d container(s) with an invalid name, image reference or image ID", dropped))
 		}
 		level := "info"
 		if in.Status == "error" {
