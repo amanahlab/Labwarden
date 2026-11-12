@@ -39,6 +39,9 @@ const config = defineConfig({
     // Neutral accent: Chakra's gray solid (gray.900 / white) sits next to Ink.
     html: { colorPalette: "gray" },
     body: { bg: "canvas" },
+    // Thin scrollbars on a clear track, so a classic (always shown) scrollbar
+    // does not paint a grey bar with arrows down the edge of the sheet.
+    "*": { scrollbarWidth: "thin", scrollbarColor: "{colors.border.emphasized} transparent" },
   },
   theme: {
     recipes: {
