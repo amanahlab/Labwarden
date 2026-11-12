@@ -13,7 +13,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 5. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
 6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, the Go toolchain image in `scripts/go.sh`, which must match the Dockerfile's server stage, `docker-compose.yml`, `docker-compose.dev.yml`, the agent snippets in `web/src/lib/agent.ts`) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. Bump Grype and Syft together, deliberately. Our own images (`ghcr.io/amanahlab/labwarden`, `ghcr.io/amanahlab/labwarden-agent`) are published by `.github/workflows/release.yml`; the release embeds its own agent image in the dashboard's agent snippets (build arg `AGENT_IMAGE`). After each release, a follow-up PR pins the new tag and index digest in `docker-compose.yml` (dashboard) and in `docs/setup/agent-docker.md`, `README.md` and the fallback in `web/src/lib/agent.ts` (agent).
 7. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check their current docs before writing against them.
-8. Brand: the logo and palette live in `docs/brand/` (read `GUIDELINES.md` first). Use the `brand` and `canvas`/`surface` theme tokens, keep Signal orange for the logo light and the KEV marker only, and never retype the wordmark in a font: use the `Brand.tsx` components.
+8. Brand: the logo and palette live in `docs/brand/` (read `GUIDELINES.md` first; its section 8 holds the product UI rules). Use the `brand` and `canvas`/`surface` theme tokens, keep Signal orange for the logo light and the KEV marker only, and never retype the wordmark in a font: use the `Brand.tsx` components. A task with a form opens in a side sheet (`Sheet.tsx`, state in `?sheet=`); destructive confirms stay alert dialogs. Shadows only on things that float. Check a UI change in light and dark with `scripts/screenshots.sh`.
 
 ## Layout
 
@@ -43,6 +43,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 scripts/test.sh          # go vet + go test + web typecheck/lint/build, all in containers
 scripts/test.sh go web    # only these sections (go, web, vuln, shell); CI runs each as a parallel job
 scripts/e2e.sh           # full stack + testbed, asserts known CVEs arrive in the dashboard
+scripts/screenshots.sh   # every page, light and dark, three widths, into screenshots/ (gitignored)
 scripts/dev-env.sh       # .env with dev secrets and COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
 docker compose up -d --build   # dashboard built from source on http://localhost:8080
 ```
