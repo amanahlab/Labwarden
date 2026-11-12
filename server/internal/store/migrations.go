@@ -226,4 +226,21 @@ CREATE TABLE container_images (
 );
 CREATE INDEX container_images_repo ON container_images(repository, tag);
 `,
+	// 6: what each running repository:tag points at upstream, as the registry
+	// checker last saw it. A failed check keeps the last good data.
+	`
+CREATE TABLE image_upstream (
+  repository      TEXT NOT NULL,
+  tag             TEXT NOT NULL,
+  digest          TEXT NOT NULL DEFAULT '',      -- the tag's digest upstream ('' = never read)
+  digest_since    TEXT,                          -- when that digest was first seen
+  newest_tag      TEXT NOT NULL DEFAULT '',      -- newest tag of the same shape, if newer
+  newest_in_major TEXT NOT NULL DEFAULT '',
+  newest_since    TEXT,                          -- since when a newer tag exists
+  outcome         TEXT NOT NULL,                 -- ok, not_found, not_allowed, rate_limited, error
+  error           TEXT NOT NULL DEFAULT '',
+  checked_at      TEXT NOT NULL,
+  PRIMARY KEY(repository, tag)
+);
+`,
 }

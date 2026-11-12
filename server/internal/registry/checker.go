@@ -38,6 +38,7 @@ type Result struct {
 	Digest        string // what the tag points at upstream now
 	Newest        string // newest tag of the same shape, if newer
 	NewestInMajor string // newest tag in the running major version, if newer
+	Listed        bool   // the Newest fields are known (the tag list was read, or the tag is no version)
 	Outcome       Outcome
 	Error         string // short, for people; never holds credentials
 }
@@ -166,6 +167,7 @@ func (c *Checker) Check(ctx context.Context, repository string, tags []string) m
 	}
 
 	var list []string
+	listed := false
 	if slices.ContainsFunc(tags, Versioned) {
 		cctx, cancel := context.WithTimeout(ctx, c.timeout)
 		list, err = remote.List(repo, append(c.opts, remote.WithContext(cctx))...)
@@ -174,8 +176,8 @@ func (c *Checker) Check(ctx context.Context, repository string, tags []string) m
 			if o, msg := classify(err); o == RateLimited {
 				return all(Result{Outcome: o, Error: msg})
 			}
-			list = nil // newer tags stay unknown; the digest check still runs
 		}
+		listed = err == nil // else newer tags stay unknown; the digest check still runs
 	}
 	for _, tag := range tags {
 		cctx, cancel := context.WithTimeout(ctx, c.timeout)
@@ -189,7 +191,7 @@ func (c *Checker) Check(ctx context.Context, repository string, tags []string) m
 			}
 			continue
 		}
-		r := Result{Digest: desc.Digest.String(), Outcome: OK}
+		r := Result{Digest: desc.Digest.String(), Outcome: OK, Listed: listed || !Versioned(tag)}
 		r.Newest, r.NewestInMajor = Newer(tag, list)
 		out[tag] = r
 	}

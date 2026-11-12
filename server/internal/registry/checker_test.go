@@ -83,8 +83,8 @@ func TestCheckDigestAndNewerTags(t *testing.T) {
 	c := checker(t, Options{Registries: []string{host}})
 	got := c.Check(context.Background(), host+"/team/app", []string{"1.0.0", "latest"})
 	want := map[string]Result{
-		"1.0.0":  {Digest: running, Newest: "2.0.0", NewestInMajor: "1.1.0", Outcome: OK},
-		"latest": {Digest: latest, Outcome: OK},
+		"1.0.0":  {Digest: running, Newest: "2.0.0", NewestInMajor: "1.1.0", Listed: true, Outcome: OK},
+		"latest": {Digest: latest, Listed: true, Outcome: OK},
 	}
 	for tag, w := range want {
 		if got[tag] != w {
