@@ -32,8 +32,11 @@ RUN go mod download
 ARG TARGETOS TARGETARCH
 # Compile the direct dependencies (modernc sqlite dominates) in a layer that
 # only go.mod and go.sum invalidate; a source change then compiles our code only.
+# Modules whose root is not a package (go-containerregistry, docker/cli) are
+# left out here and compile with our code.
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
-      $(go list -m -f '{{if not (or .Main .Indirect)}}{{.Path}}{{end}}' all)
+      $(go list -e -f '{{if not .Error}}{{.ImportPath}}{{end}}' \
+        $(go list -m -f '{{if not (or .Main .Indirect)}}{{.Path}}{{end}}' all))
 COPY server/ server/
 COPY agent/ agent/
 COPY web/embed.go web/
