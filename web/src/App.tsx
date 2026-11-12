@@ -30,6 +30,7 @@ const router = createBrowserRouter([
       { path: "vulnerabilities/:id", handle: { title: "Vulnerabilities" }, lazy: async () => ({ Component: (await import("@/pages/VulnDetail")).VulnDetailPage }) },
       { path: "hosts", handle: { title: "Hosts" }, lazy: async () => ({ Component: (await import("@/pages/Hosts")).HostsPage }) },
       { path: "hosts/:id", handle: { title: "Hosts" }, lazy: async () => ({ Component: (await import("@/pages/HostDetail")).HostDetailPage }) },
+      { path: "images", handle: { title: "Images" }, lazy: async () => ({ Component: (await import("@/pages/Images")).ImagesPage }) },
       { path: "scans", handle: { title: "Scans" }, lazy: async () => ({ Component: (await import("@/pages/Scans")).ScansPage }) },
       { path: "logs", handle: { title: "Logs" }, lazy: async () => ({ Component: (await import("@/pages/Logs")).LogsPage }) },
       { path: "settings", handle: { title: "Settings" }, lazy: async () => ({ Component: (await import("@/pages/Settings")).SettingsPage }) },
