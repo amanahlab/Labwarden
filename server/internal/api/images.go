@@ -97,6 +97,15 @@ func (s *Server) listImages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+func (s *Server) listImageHosts(w http.ResponseWriter, r *http.Request) {
+	out, err := s.st.ImageHosts(r.Context())
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) listImageRegistries(w http.ResponseWriter, r *http.Request) {
 	out, err := s.st.ImageRegistries(r.Context())
 	if err != nil {
