@@ -280,7 +280,8 @@ export function Layout() {
             )}
           </HStack>
         </Flex>
-        {/* The content sheet: the one raised surface on the canvas, and the scroll container. */}
+        {/* The content sheet: the one raised surface on the canvas, and the scroll container.
+            The clip keeps its scrollbar inside the rounded corners. */}
         <Box
           as="main"
           ref={main}
@@ -290,6 +291,7 @@ export function Layout() {
           bg="surface"
           borderWidth="1px"
           rounded="sheet"
+          clipPath="inset(0 round {radii.sheet})"
           ms={{ base: "2", lg: "0" }}
           me={{ base: "2", lg: "3" }}
           mb={{ base: "2", lg: "3" }}
