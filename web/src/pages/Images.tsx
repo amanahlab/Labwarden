@@ -290,7 +290,12 @@ function CheckNow({ system, checking }: { system?: SystemInfo; checking: boolean
       e instanceof ApiError && e.status === 409
         ? toaster.create({ type: "info", title: "An image check is already queued" })
         : toaster.create({ type: "error", title: "Could not queue the image check", description: (e as Error).message }),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["system"] }),
+    // A quick check can finish before the queue count is fetched, so the
+    // list is refreshed once that count is in, whatever it says.
+    onSettled: async () => {
+      await qc.invalidateQueries({ queryKey: ["system"] })
+      await qc.invalidateQueries({ queryKey: ["images"] })
+    },
   })
   if (!ic) return null
   if (!ic.enabled)
