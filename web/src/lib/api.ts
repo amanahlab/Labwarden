@@ -164,7 +164,7 @@ export interface HostRow extends Counts {
 
 // One image running somewhere: a repository and tag at one digest, across
 // every host that runs it (GET /images).
-export type ImageStatus = "local" | "pinned" | "unchecked"
+export type ImageStatus = "current" | "outdated" | "unchecked" | "not_found" | "error" | "pinned" | "local"
 
 export interface ImageHost {
   id: number
@@ -187,6 +187,14 @@ export interface ImageRow {
   containers: number
   first_seen: string
   last_seen: string
+  // The last upstream check; empty for local and pinned images.
+  upstream_digest: string
+  drift: boolean // the tag points at another build upstream
+  newest_tag: string
+  newest_in_major: string
+  checked_at: string
+  check_error: string // why the last check did not finish
+  update_since: string // since when an update is available
 }
 
 export interface TargetRow extends Counts {
@@ -289,6 +297,14 @@ export interface SystemInfo {
     rematching: number
     last_rematch?: string
     next_db_update: string
+    image_checks: number
+  }
+  image_check: {
+    enabled: boolean
+    interval_hours: number
+    registries: string[]
+    with_credentials: string[] // registry host names only
+    last_checked: string
   }
 }
 

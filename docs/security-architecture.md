@@ -78,6 +78,16 @@ Earlier versions had an endpoint that let an agent upload finished scan results.
 
 A Docker agent also lists its running containers for the Images page: each container's name, the image reference it was started from, the image ID, digests and build date. The dashboard checks each entry (a real image reference, a `sha256` image ID, at most 1000 per run), and a host's list only ever replaces that host's own containers.
 
+### The dashboard asks registries about running images
+
+To tell you when a running image is out of date, the dashboard asks container registries about each image: one list of the tags and one short `HEAD` request per running tag, once a day by default. Image names come from agents, so a compromised host could report a made-up image on an internal address and try to make the dashboard call it. To prevent that:
+- **Only allowed registries are asked.** The allowlist holds the well-known public registries (Docker Hub, GitHub, Quay, LinuxServer, Google, Kubernetes, Microsoft, Amazon ECR Public), any you add with `LABWARDEN_IMAGE_REGISTRIES`, and those you gave credentials for. Other images stay *Not checked* and cause no request at all.
+- **Every request is checked, not just the first.** A redirect to a host that is not allowed is refused, and a registry's token server is allowed only because an allowed registry named it.
+- **Credentials go only to their own registry.** They come from a read-only Docker `config.json` you mount, or from `SYFT_REGISTRY_AUTH_*` settings. They are never stored in the database, shown in the UI or logged; Settings shows only which registries have them.
+- **It backs off.** One request runs at a time, each with a 20-second limit. A rate limit stops the check of that repository until the next round instead of retrying.
+
+`LABWARDEN_IMAGE_CHECK=false` turns this off entirely.
+
 ### Links are checked
 
 Vulnerability data includes reference links. LabWarden keeps only `http` and `https` links, and the UI only turns those into clickable links, so a crafted entry can't slip a `javascript:` link into the dashboard.
@@ -148,8 +158,9 @@ The dashboard runs as an unprivileged user (uid 10001).
 3. Give enrollment tokens a short expiry and a host limit, and revoke them when you're done.
 4. Install agents with the download, check, run snippet from Settings.
 5. Use the socket proxy for Docker agents.
-6. If a host is compromised or retired, delete it or click **Reset agent credential**, and revoke the token that enrolled it.
-7. Look at **Logs** now and then for refused logins and rejected agent requests.
+6. Give registry credentials read access only.
+7. If a host is compromised or retired, delete it or click **Reset agent credential**, and revoke the token that enrolled it.
+8. Look at **Logs** now and then for refused logins and rejected agent requests.
 
 ## Known limitations
 

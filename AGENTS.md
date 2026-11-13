@@ -12,7 +12,7 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 4. No secrets in git. Tokens and passwords live in the gitignored `.env` (for development, generate it with `scripts/dev-env.sh`). Ingest tokens are stored hashed.
 5. `testbed/` contains **deliberately vulnerable** packages. Never reuse its pins or images outside the testbed.
 6. Pin tool versions (`GRYPE_VERSION` in the server Dockerfile, `SYFT_VERSION` in both Dockerfiles and `install.sh`, together with the Syft release SHA-256 sums pinned in `install.sh`, River in `go.mod`, govulncheck in `scripts/test.sh`). Shipped images (Dockerfiles, the Go toolchain image in `scripts/go.sh`, which must match the Dockerfile's server stage, `docker-compose.yml`, `docker-compose.dev.yml`, the agent snippets in `web/src/lib/agent.ts`) are pinned by tag and multi-arch index digest (`docker buildx imagetools inspect`); update both together. Bump Grype and Syft together, deliberately. Our own images (`ghcr.io/amanahlab/labwarden`, `ghcr.io/amanahlab/labwarden-agent`) are published by `.github/workflows/release.yml`; the release embeds its own agent image in the dashboard's agent snippets (build arg `AGENT_IMAGE`), signs a build provenance attestation for both indexes and creates the GitHub Release, whose notes list both tag@index digests. After each release, a follow-up PR pins the new tag and index digest in `docker-compose.yml` (dashboard) and in `docs/setup/agent-docker.md`, `README.md` and the fallback in `web/src/lib/agent.ts` (agent). Dependabot (`.github/dependabot.yml`) opens weekly PRs for actions, base images, Compose, Go modules and web npm; it never touches `testbed/`, Grype/Syft, our own images, the snippets or Node majors (LTS bumps of `node` and `@types/node` are by hand), and CI fails a Go image bump until `scripts/go.sh` matches the Dockerfile.
-7. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River) change often: check their current docs before writing against them.
+7. Library APIs (Chakra v3, Recharts, chi, modernc sqlite, River, go-containerregistry) change often: check their current docs before writing against them.
 8. Brand: the logo and palette live in `docs/brand/` (read `GUIDELINES.md` first; its section 8 holds the product UI rules). Use the `brand` and `canvas`/`surface` theme tokens, keep Signal orange for the logo light and the KEV marker only, and never retype the wordmark in a font: use the `Brand.tsx` components. A task with a form opens in a side sheet (`Sheet.tsx`, state in `?sheet=`); destructive confirms stay alert dialogs. Shadows only on things that float. Check a UI change in light and dark with `scripts/screenshots.sh`.
 
 ## Layout
@@ -24,8 +24,8 @@ Project rules for coding agents. `CLAUDE.md` holds the same rules. Change both f
 | SQLite store, schema, queries | `server/internal/store` |
 | HTTP API (`/api/v1`), auth, ingest | `server/internal/api` |
 | Scanner (runs the grype binary) and the single Grype DB | `server/internal/scanner` |
-| Image references (parsed with `distribution/reference`) for the Images page | `server/internal/registry` |
-| Job queue (River on `queue.db`): SBOM matching, central scans, re-matches, DB update | `server/internal/jobs` |
+| Image references (parsed with `distribution/reference`), the upstream checker (go-containerregistry: tag list and `HEAD`, a registry allowlist enforced in its transport, credentials from `DOCKER_CONFIG` inline auths and `SYFT_REGISTRY_AUTH_*`) and newer-tag picking for the Images page | `server/internal/registry` |
+| Job queue (River on `queue.db`): SBOM matching, central scans, re-matches, DB update, image update checks (`registry` queue, one worker) | `server/internal/jobs` |
 | Stored SBOM files (content-addressed, gzipped) | `server/internal/sboms` |
 | Webhook alerts for new findings | `server/internal/notify` |
 | React UI (Vite, Chakra UI v3, TanStack Query), embedded into the binary | `web/` |

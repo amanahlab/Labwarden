@@ -33,7 +33,7 @@ const fakeSyft = `#!/bin/sh
 echo '{"artifacts":[],"source":{"type":"image"}}'
 `
 
-func setup(t *testing.T, withDB bool) (*Queue, *store.Store) {
+func setup(t *testing.T, withDB bool, opts ...func(*Config)) (*Queue, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "grype")
@@ -65,8 +65,11 @@ func setup(t *testing.T, withDB bool) (*Queue, *store.Store) {
 	if _, err := sc.UpdateDB(context.Background(), 0); err != nil { // finds the fake DB
 		t.Fatal(err)
 	}
-	q, err := Open(context.Background(), Config{Path: filepath.Join(dir, "queue.db"), ScanWorkers: 2,
-		Scheduler: true, DBUpdateAt: "03:00", SBOMs: sb}, st, sc, log)
+	cfg := Config{Path: filepath.Join(dir, "queue.db"), ScanWorkers: 2, Scheduler: true, DBUpdateAt: "03:00", SBOMs: sb}
+	for _, o := range opts {
+		o(&cfg)
+	}
+	q, err := Open(context.Background(), cfg, st, sc, log)
 	if err != nil {
 		t.Fatal(err)
 	}

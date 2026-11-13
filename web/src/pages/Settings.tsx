@@ -24,7 +24,7 @@ import {
 } from "@chakra-ui/react"
 import { LuBell, LuCloud, LuDownload, LuKeyRound, LuLogOut, LuPlay, LuPlus, LuRefreshCw, LuTrash2 } from "react-icons/lu"
 import { api, type AgentCredential, type CentralTarget, type SystemInfo, type Token } from "@/lib/api"
-import { ago, dateTime } from "@/lib/format"
+import { ago, dateTime, interval } from "@/lib/format"
 import { agentSnippets, TTL_OPTIONS } from "@/lib/agent"
 import { useSheet } from "@/lib/useSheet"
 import { CodeBlock, DataTable, Empty, ErrorBox, Header, Mono, PageHeader, Panel, Select, Step } from "@/components/common"
@@ -555,9 +555,40 @@ function SystemPanel() {
               <NotifyStatus n={s.notify} />
             </DataList.ItemValue>
           </DataList.Item>
+          <DataList.Item>
+            <DataList.ItemLabel>Image updates</DataList.ItemLabel>
+            <DataList.ItemValue>
+              <ImageCheckStatus c={s.image_check} pending={s.queue.image_checks} />
+            </DataList.ItemValue>
+          </DataList.Item>
         </DataList.Root>
       )}
     </Panel>
+  )
+}
+
+// Which registries the server may ask about running images, and which of
+// them it has credentials for (host names only).
+function ImageCheckStatus({ c, pending }: { c: SystemInfo["image_check"]; pending: number }) {
+  if (!c.enabled)
+    return (
+      <Text color="fg.muted">
+        Off (<Code size="sm">LABWARDEN_IMAGE_CHECK=false</Code>): running images are not compared with their registries.
+      </Text>
+    )
+  return (
+    <Stack gap="0">
+      <Text>
+        Every {interval(c.interval_hours * 3600)} · last check {ago(c.last_checked)}
+        {pending > 0 && ` · ${pending} pending`}
+      </Text>
+      <Text textStyle="xs" color="fg.muted">
+        Registries: {c.registries.join(", ")}
+      </Text>
+      <Text textStyle="xs" color="fg.muted">
+        With credentials: {c.with_credentials.length ? c.with_credentials.join(", ") : "none"}
+      </Text>
+    </Stack>
   )
 }
 
@@ -591,8 +622,8 @@ function AddImageForm({ onDone }: { onDone: () => void }) {
             <Input fontFamily="mono" placeholder="nginx:1.25 or ghcr.io/org/app:tag" value={form.ref} onChange={(e) => setForm({ ...form, ref: e.currentTarget.value })} />
             <Field.HelperText>
               Private registries: mount Docker credentials into the dashboard container (see{" "}
-              <CLink href="https://github.com/anchore/grype#private-registry-authentication" target="_blank" rel="noopener noreferrer">
-                Grype registry auth
+              <CLink href="https://github.com/amanahlab/Labwarden/blob/main/docs/setup/server-docker-compose.md#private-registries" target="_blank" rel="noopener noreferrer">
+                Private registries
               </CLink>
               ).
             </Field.HelperText>

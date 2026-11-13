@@ -24,3 +24,6 @@ data/
 
 # review screenshots (scripts/screenshots.sh)
 screenshots/
+
+# registry credentials for the dashboard (docs/setup/server-docker-compose.md)
+registry-auth/

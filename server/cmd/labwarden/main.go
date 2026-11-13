@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // TZ works in images without zoneinfo
@@ -19,6 +20,7 @@ import (
 	"github.com/amanahlab/labwarden/server/internal/api"
 	"github.com/amanahlab/labwarden/server/internal/jobs"
 	"github.com/amanahlab/labwarden/server/internal/notify"
+	"github.com/amanahlab/labwarden/server/internal/registry"
 	"github.com/amanahlab/labwarden/server/internal/sboms"
 	"github.com/amanahlab/labwarden/server/internal/scanner"
 	"github.com/amanahlab/labwarden/server/internal/store"
@@ -43,6 +45,33 @@ func main() {
 		log.Error("fatal", "err", err)
 		os.Exit(1)
 	}
+}
+
+// imageChecks reads the LABWARDEN_IMAGE_CHECK* settings. A nil checker
+// turns the checks off (air-gapped installs).
+func imageChecks(log *slog.Logger) (jobs.ImageChecker, time.Duration, error) {
+	every, err := time.ParseDuration(env("LABWARDEN_IMAGE_CHECK_INTERVAL", "24h"))
+	if err != nil || every < time.Hour {
+		return nil, 0, errors.New("LABWARDEN_IMAGE_CHECK_INTERVAL: want a duration of at least 1h, such as 24h")
+	}
+	if env("LABWARDEN_IMAGE_CHECK", "true") != "true" {
+		log.Info("image update checks are off")
+		return nil, every, nil
+	}
+	var extra []string
+	for _, r := range strings.Split(os.Getenv("LABWARDEN_IMAGE_REGISTRIES"), ",") {
+		if r = strings.TrimSpace(r); r != "" {
+			extra = append(extra, r)
+		}
+	}
+	c, err := registry.NewChecker(registry.Options{Registries: extra, DockerConfig: os.Getenv("DOCKER_CONFIG"),
+		UserAgent: "labwarden/" + version, Log: log})
+	if err != nil {
+		return nil, 0, err
+	}
+	// Host names only: never the credentials.
+	log.Info("image update checks", "every", every.String(), "registries", c.Registries(), "with_credentials", c.Credentials())
+	return c, every, nil
 }
 
 // prepareTempDir makes sure TMPDIR exists. The image points it at <data>/tmp
@@ -127,6 +156,10 @@ func run(log *slog.Logger) error {
 	sc.Init(ctx)
 	workers, _ := strconv.Atoi(env("LABWARDEN_SCAN_WORKERS", "2"))
 	maxQueued, _ := strconv.Atoi(env("LABWARDEN_QUEUE_MAX", "1000"))
+	checker, checkEvery, err := imageChecks(log)
+	if err != nil {
+		return err
+	}
 	q, err := jobs.Open(ctx, jobs.Config{
 		Path:         filepath.Join(dataDir, "queue.db"),
 		ScanWorkers:  workers,
@@ -135,6 +168,9 @@ func run(log *slog.Logger) error {
 		SBOMs:        sb,
 		MaxQueued:    maxQueued,
 		MinFreeBytes: 1 << 30,
+
+		ImageChecker:    checker,
+		ImageCheckEvery: checkEvery,
 	}, st, sc, log)
 	if err != nil {
 		return err

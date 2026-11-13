@@ -372,7 +372,13 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 		s.storeErr(w, r, err)
 		return
 	}
+	images, err := s.imageCheckStatus(r)
+	if err != nil {
+		s.storeErr(w, r, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
+		"image_check":    images,
 		"version":        s.cfg.Version,
 		"auth_enabled":   s.authEnabled(),
 		"scanner":        s.scan.Status(),

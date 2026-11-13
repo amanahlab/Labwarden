@@ -143,6 +143,19 @@ workload_listed() {
 }
 wait_for 120 "running containers reach the Images page" workload_listed
 
+# Upstream checks: only that one ran, not what it found. On the classic image
+# store the workload is a local build and never checked; on the containerd
+# store it has a repo digest, so Docker Hub is asked and says not found.
+api "$URL/api/v1/system" | jqr -e '.image_check.enabled and (.image_check.registries | index("docker.io"))' >/dev/null ||
+  fail "image update checks are not on"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -b "$JAR" -X POST -H 'Content-Type: application/json' -d '{}' "$URL/api/v1/images/check")
+case $code in 202 | 409) pass "Check now queued ($code)" ;; *) fail "POST /images/check answered $code" ;; esac
+workload_checked() {
+  api "$URL/api/v1/images?q=testbed-workload" | jqr -e \
+    '.items[] | select(.name == "labwarden-testbed-workload") | (.status == "local" or .checked_at != "") and .status != "unchecked"'
+}
+wait_for 120 "the workload image has an upstream status" workload_checked
+
 echo "== triage"
 VID=$(api "$URL/api/v1/vulnerabilities?q=CVE-2021-44228" | jqr -r '.items[0].id')
 api -o /dev/null -X PUT -H 'Content-Type: application/json' -d '{"host_id":0,"status":"acknowledged","note":"e2e"}' "$URL/api/v1/vulnerabilities/$VID/triage"

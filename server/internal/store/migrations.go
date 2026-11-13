@@ -226,4 +226,37 @@ CREATE TABLE container_images (
 );
 CREATE INDEX container_images_repo ON container_images(repository, tag);
 `,
+	// 6: what each running repository:tag points at upstream, as the registry
+	// checker last saw it. A failed check keeps the last good data.
+	`
+CREATE TABLE image_upstream (
+  repository      TEXT NOT NULL,
+  tag             TEXT NOT NULL,
+  digest          TEXT NOT NULL DEFAULT '',      -- the tag's digest upstream ('' = never read)
+  digest_since    TEXT,                          -- when that digest was first seen
+  newest_tag      TEXT NOT NULL DEFAULT '',      -- newest tag of the same shape, if newer
+  newest_in_major TEXT NOT NULL DEFAULT '',
+  newest_since    TEXT,                          -- since when a newer tag exists
+  outcome         TEXT NOT NULL,                 -- ok, not_found, not_allowed, rate_limited, error
+  error           TEXT NOT NULL DEFAULT '',
+  checked_at      TEXT NOT NULL,
+  PRIMARY KEY(repository, tag)
+);
+`,
+	// 7: when the tag list was last read (NULL: newer versions unknown), and
+	// every digest a running tag pointed at upstream, so an update counts
+	// from the first build after the running one, not the latest.
+	`
+ALTER TABLE image_upstream ADD COLUMN listed_at TEXT;
+UPDATE image_upstream SET listed_at = checked_at WHERE digest <> '';
+CREATE TABLE image_upstream_digests (
+  repository TEXT NOT NULL,
+  tag        TEXT NOT NULL,
+  digest     TEXT NOT NULL,
+  first_seen TEXT NOT NULL,
+  PRIMARY KEY(repository, tag, digest)
+) WITHOUT ROWID;
+INSERT INTO image_upstream_digests(repository, tag, digest, first_seen)
+  SELECT repository, tag, digest, COALESCE(digest_since, checked_at) FROM image_upstream WHERE digest <> '';
+`,
 }
