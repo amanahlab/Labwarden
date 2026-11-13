@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/riverqueue/river"
+
 	"github.com/amanahlab/labwarden/server/internal/registry"
 	"github.com/amanahlab/labwarden/server/internal/store"
 )
@@ -46,6 +48,34 @@ func runImages(t *testing.T, st *store.Store) {
 	if err := st.ReplaceHostImages(ctx, "docker-1", []store.ContainerImage{{Container: "web", Ref: "nginx:1.27", Registry: "docker.io",
 		Repository: "docker.io/library/nginx", Tag: "1.27", ImageID: "sha256:" + strings.Repeat("1", 64), RepoDigest: "sha256:" + strings.Repeat("a", 64)}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// stalling answers the first tag, then the job's time runs out.
+type stalling struct {
+	fakeChecker
+	timeout context.CancelFunc
+}
+
+func (f *stalling) Check(ctx context.Context, repo string, tags []string) map[string]registry.Result {
+	out := f.fakeChecker.Check(ctx, repo, tags[:1])
+	f.timeout()
+	return out
+}
+
+// A check cut off by its timeout keeps the results it already has.
+func TestImageCheckSavesAfterTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	q, st := setup(t, false, func(c *Config) { c.ImageChecker = &stalling{timeout: cancel} })
+	runImages(t, st)
+	w := &imageCheckWorker{q: q}
+	if err := w.Work(ctx, &river.Job[ImageCheckArgs]{Args: ImageCheckArgs{Repository: "docker.io/library/nginx"}}); err != nil {
+		t.Fatal(err)
+	}
+	l, err := st.ListImages(context.Background(), store.ImageFilter{}, store.Page{})
+	if err != nil || l.Total != 1 || l.Items[0].Status != "outdated" {
+		t.Errorf("after a timed-out check: %+v, %v", l, err)
 	}
 }
 

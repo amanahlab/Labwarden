@@ -123,6 +123,36 @@ func TestCheckTagListFails(t *testing.T) {
 	}
 }
 
+// When the job runs out of time, the tags answered so far keep their result
+// and the rest are left out instead of failing with "context canceled".
+func TestCheckStopsWhenContextEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var armed atomic.Bool // not while pushing: remote.Write HEADs first
+	host := testRegistry(t, func(h http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if armed.Load() && strings.HasSuffix(r.URL.Path, "/manifests/1.1.0") {
+				cancel()
+				<-r.Context().Done()
+				return
+			}
+			h.ServeHTTP(w, r)
+		})
+	})
+	first := push(t, host, "team/app", "1.0.0")
+	push(t, host, "team/app", "1.1.0")
+	push(t, host, "team/app", "1.2.0")
+	armed.Store(true)
+
+	got := checker(t, Options{Registries: []string{host}}).Check(ctx, host+"/team/app", []string{"1.0.0", "1.1.0", "1.2.0"})
+	if len(got) != 1 || got["1.0.0"].Outcome != OK || got["1.0.0"].Digest != first {
+		t.Errorf("got %+v, want only 1.0.0", got)
+	}
+	if got := checker(t, Options{Registries: []string{host}}).Check(ctx, host+"/team/app", []string{"1.0.0"}); len(got) != 0 {
+		t.Errorf("ended context: %+v", got)
+	}
+}
+
 func TestCheckNotFound(t *testing.T) {
 	host := testRegistry(t, nil)
 	push(t, host, "team/app", "1.0.0")

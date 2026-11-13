@@ -147,7 +147,9 @@ func (c *Checker) Registries() []string {
 func (c *Checker) Credentials() []string { return slices.Clone(c.creds) }
 
 // Check looks up the running tags of one repository (a normalised name such
-// as docker.io/library/nginx). Every tag gets a Result.
+// as docker.io/library/nginx). Every tag gets a Result, unless ctx ends
+// first: then the tags not reached yet (and one cut off mid-request) are left
+// out, so the caller saves only what was really answered.
 func (c *Checker) Check(ctx context.Context, repository string, tags []string) map[string]Result {
 	out := make(map[string]Result, len(tags))
 	all := func(r Result) map[string]Result {
@@ -172,6 +174,9 @@ func (c *Checker) Check(ctx context.Context, repository string, tags []string) m
 		cctx, cancel := context.WithTimeout(ctx, c.timeout)
 		list, err = remote.List(repo, append(c.opts, remote.WithContext(cctx))...)
 		cancel()
+		if ctx.Err() != nil {
+			return out
+		}
 		if err != nil {
 			if o, msg := classify(err); o == RateLimited {
 				return all(Result{Outcome: o, Error: msg})
@@ -188,6 +193,9 @@ func (c *Checker) Check(ctx context.Context, repository string, tags []string) m
 		cctx, cancel := context.WithTimeout(ctx, c.timeout)
 		desc, err := remote.Head(repo.Tag(tag), append(c.opts, remote.WithContext(cctx))...)
 		cancel()
+		if ctx.Err() != nil {
+			break
+		}
 		if err != nil {
 			o, msg := classify(err)
 			out[tag] = Result{Outcome: o, Error: msg}

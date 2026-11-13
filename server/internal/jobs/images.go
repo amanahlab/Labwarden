@@ -64,10 +64,19 @@ func (w *imageCheckWorker) Work(ctx context.Context, job *river.Job[ImageCheckAr
 	}
 	// Registry trouble is recorded per tag, not retried: the next sweep
 	// tries again, which is what a rate limit wants.
-	for tag, r := range c.Check(ctx, repo, tags) {
-		if err := w.q.st.SaveImageCheck(ctx, repo, tag, r); err != nil {
+	results := c.Check(ctx, repo, tags)
+	// A job that ran out of time still saves the tags it got an answer for;
+	// the others stay due and wait for the next sweep instead of a retry
+	// that would ask the same slow registry again.
+	save, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	for tag, r := range results {
+		if err := w.q.st.SaveImageCheck(save, repo, tag, r); err != nil {
 			return err
 		}
+	}
+	if ctx.Err() != nil {
+		w.q.log.Warn("image check ran out of time", "repository", repo, "checked", len(results), "tags", len(tags))
 	}
 	return nil
 }
