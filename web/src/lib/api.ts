@@ -162,6 +162,33 @@ export interface HostRow extends Counts {
   score: number
 }
 
+// One image running somewhere: a repository and tag at one digest, across
+// every host that runs it (GET /images).
+export type ImageStatus = "local" | "pinned" | "unchecked"
+
+export interface ImageHost {
+  id: number
+  name: string
+  containers: string[]
+}
+
+export interface ImageRow {
+  name: string
+  repository: string
+  registry: string
+  tag: string
+  ref: string
+  pinned_digest: string
+  digest: string // "" = built locally
+  image_id: string
+  image_created: string // "" = unknown
+  status: ImageStatus
+  hosts: ImageHost[]
+  containers: number
+  first_seen: string
+  last_seen: string
+}
+
 export interface TargetRow extends Counts {
   id: number
   name: string

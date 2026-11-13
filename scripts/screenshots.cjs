@@ -35,6 +35,7 @@ async function main() {
     ["vulnerabilities", "/vulnerabilities"],
     ["findings", "/vulnerabilities?view=findings"],
     ["hosts", "/hosts"],
+    ["images", "/images"],
     ["scans", "/scans"],
     ["logs", "/logs"],
     ["settings", "/settings"],

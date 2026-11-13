@@ -3,7 +3,9 @@ module github.com/amanahlab/labwarden
 go 1.27
 
 require (
+	github.com/distribution/reference v0.6.0
 	github.com/go-chi/chi/v5 v5.5.0
+	github.com/opencontainers/go-digest v1.0.0
 	github.com/riverqueue/river v0.51.2
 	github.com/riverqueue/river/riverdriver/riversqlite v0.51.2
 	github.com/riverqueue/river/rivertype v0.51.2

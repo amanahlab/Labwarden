@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Badge, Box, Button, CloseButton, Drawer, Flex, HStack, Heading, IconButton, Input, InputGroup, Kbd, Portal, Separator, Stack, chakra } from "@chakra-ui/react"
 import {
   LuActivity,
+  LuContainer,
   LuGauge,
   LuLogOut,
   LuMenu,
@@ -32,6 +33,7 @@ const NAV_FINDINGS: NavEntry[] = [
   { to: "/", label: "Overview", icon: LuGauge, end: true },
   { to: "/vulnerabilities", label: "Vulnerabilities", icon: LuShieldAlert },
   { to: "/hosts", label: "Hosts", icon: LuServer },
+  { to: "/images", label: "Images", icon: LuContainer },
 ]
 const NAV_ACTIVITY: NavEntry[] = [
   { to: "/scans", label: "Scans", icon: LuActivity },

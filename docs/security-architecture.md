@@ -76,6 +76,8 @@ On the host, the agent keeps its credential in `/var/lib/labwarden/credential`, 
 
 Earlier versions had an endpoint that let an agent upload finished scan results. Those results could rewrite vulnerability details shared by every host. It has been removed. Agents now send only the list of packages (an SBOM), and the dashboard does all the vulnerability matching itself, with its own vulnerability database.
 
+A Docker agent also lists its running containers for the Images page: each container's name, the image reference it was started from, the image ID, digests and build date. The dashboard checks each entry (a real image reference, a `sha256` image ID, at most 1000 per run), and a host's list only ever replaces that host's own containers.
+
 ### Links are checked
 
 Vulnerability data includes reference links. LabWarden keeps only `http` and `https` links, and the UI only turns those into clickable links, so a crafted entry can't slip a `javascript:` link into the dashboard.
