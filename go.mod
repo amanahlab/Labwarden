@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/distribution/reference v0.6.0
-	github.com/docker/cli v29.7.2+incompatible
+	github.com/docker/cli v29.10.0+incompatible
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/opencontainers/go-digest v1.0.0
