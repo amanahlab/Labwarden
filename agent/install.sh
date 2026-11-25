@@ -63,7 +63,7 @@ validate() {
 	! has_ctrl "${LABWARDEN_SCAN_PATHS:-}" || die "LABWARDEN_SCAN_PATHS must not contain control characters"
 	matches "${LABWARDEN_SCAN_DOCKER:-auto}" 'auto|true|false' || die "LABWARDEN_SCAN_DOCKER must be auto, true or false"
 	matches "${LABWARDEN_INTERVAL:-21600}" '[0-9]{1,7}' || die "LABWARDEN_INTERVAL must be a number of seconds"
-	[ -z "${LABWARDEN_RESCAN_DAYS:-}" ] || matches "$LABWARDEN_RESCAN_DAYS" '[0-9]{1,4}' ||
+	[ -z "${LABWARDEN_RESCAN_DAYS:-}" ] || matches "$LABWARDEN_RESCAN_DAYS" '0|[1-9][0-9]{0,3}' ||
 		die "LABWARDEN_RESCAN_DAYS must be a number of days"
 	[ -z "${LABWARDEN_SCHEDULE:-}" ] || matches "$LABWARDEN_SCHEDULE" '[A-Za-z0-9*:/,. ~-]{1,100}' ||
 		die "LABWARDEN_SCHEDULE must be a systemd OnCalendar expression"

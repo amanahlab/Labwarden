@@ -30,6 +30,8 @@ check "a group with a quote passes (it is quoted)" 0 with "LABWARDEN_GROUP=\"bob
 check "cron with five fields passes" 0 with 'LABWARDEN_CRON="5 */6 * * 1-5"'
 check "rescan days as a number pass" 0 with 'LABWARDEN_RESCAN_DAYS=14'
 check "rescan days with shell code fail" 1 with 'LABWARDEN_RESCAN_DAYS="7;id"'
+check "rescan days with a leading zero fail (octal in shell arithmetic)" 1 with 'LABWARDEN_RESCAN_DAYS=08'
+check "rescan days of 0 pass" 0 with 'LABWARDEN_RESCAN_DAYS=0'
 check "systemd calendar passes" 0 with 'LABWARDEN_SCHEDULE="*-*-* 00/6:00:00"'
 check "ftp URL fails" 1 with 'LABWARDEN_URL=ftp://x'
 check "URL with a quote fails" 1 with "LABWARDEN_URL=\"http://x/'\""
@@ -225,6 +227,8 @@ agent_run
 check "cache: an image that comes back is cataloged (its target was retired)" 0 cataloged "docker:nginx:latest "
 agent_run LABWARDEN_RESCAN_DAYS=0
 check "cache: LABWARDEN_RESCAN_DAYS=0 catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+agent_run LABWARDEN_RESCAN_DAYS=08
+check "cache: a malformed LABWARDEN_RESCAN_DAYS catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
 sed -i 's/^\(sha256:i3 [^ ]*\) [0-9]*/\1 1/' "$STUB/state/scanned"
 agent_run
 check "cache: an expired image is cataloged" 0 cataloged "docker:redis:7 "

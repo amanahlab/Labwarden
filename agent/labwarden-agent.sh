@@ -343,7 +343,8 @@ export_container() { # export_container <container-id> <dir>: unpack its filesys
 
 # unchanged <image-id> <name>: true when this image was uploaded recently.
 unchanged() {
-	case "$LABWARDEN_RESCAN_DAYS" in "" | 0 | *[!0-9]*) return 1 ;; esac
+	# Not a plain number (shell arithmetic would read 08 as bad octal): no cache.
+	case "$LABWARDEN_RESCAN_DAYS" in "" | 0* | *[!0-9]*) return 1 ;; esac
 	[ -f "$SCANNED" ] || return 1
 	awk -v id="$1" -v v="$TOOLS" -v n="$2" -v min=$(($(date +%s) - LABWARDEN_RESCAN_DAYS * 86400)) \
 		'$1 == id && $2 == v && $3 >= min && $4 == n {f = 1} END {exit !f}' "$SCANNED"
