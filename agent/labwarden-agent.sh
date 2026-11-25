@@ -347,15 +347,20 @@ export_container() { # export_container <container-id> <dir>: unpack its filesys
 # SBOM and matches it again against every new vulnerability DB, so an image
 # that has not changed since is not cataloged again until its entry is
 # LABWARDEN_RESCAN_DAYS old. Each run rewrites the file with only the images it
-# still runs, so an image that comes back after a pause is uploaded again.
+# still runs, so an image that comes back after a pause is uploaded again; a
+# run without Docker scanning removes it.
 
 # unchanged <image-id> <name>: true when this image was uploaded recently.
 unchanged() {
 	# Not a plain number (shell arithmetic would read 08 as bad octal): no cache.
 	case "$LABWARDEN_RESCAN_DAYS" in "" | 0* | *[!0-9]*) return 1 ;; esac
 	[ -f "$SCANNED" ] || return 1
+	# The dashboard keeps one SBOM per name. While two running images share a
+	# name (a rolling update), catalog both; once one stops, the cache still
+	# lists two for the name, so the one left is uploaded again.
+	[ "$(awk -v n="$2" '$3 == n {c++} END {print c + 0}' "$WORK/targets.txt")" = 1 ] || return 1
 	awk -v id="$1" -v v="$TOOLS" -v n="$2" -v min=$(($(date +%s) - LABWARDEN_RESCAN_DAYS * 86400)) \
-		'$1 == id && $2 == v && $3 >= min && $4 == n {f = 1} END {exit !f}' "$SCANNED"
+		'$4 == n {c++; if ($1 == id && $2 == v && $3 >= min) f = 1} END {exit !(f && c == 1)}' "$SCANNED"
 }
 
 # keep_scanned <image-id> <name> [epoch]: list the image in this run's file,
@@ -568,10 +573,13 @@ main() {
 			log warn "could not list the running containers for the Images page"
 		fi
 		if docker_images >"$WORK/images.txt"; then
+			# "<image-id> <container-id> <target name>": an image without a
+			# name goes by its short ID.
+			awk '{n = $3; if (n == "" || n ~ /^sha256:/) {n = $1; sub(/^sha256:/, "", n); n = substr(n, 1, 12)}
+				print $1, $2, n}' "$WORK/images.txt" >"$WORK/targets.txt"
 			: >"$SCANNED.new"
 			while read -r id cid name; do
 				[ -n "$id" ] || continue
-				case "$name" in "" | sha256:*) name=$(printf '%.12s' "${id#sha256:}") ;; esac
 				add_target "$name"
 				if unchanged "$id" "$name"; then
 					log info "$name has not changed since its last upload; not cataloged again"
@@ -583,13 +591,17 @@ main() {
 				else
 					failed=$((failed + 1))
 				fi
-			done <"$WORK/images.txt"
+			done <"$WORK/targets.txt"
 			mv "$SCANNED.new" "$SCANNED"
 		else
 			rm -f "$SCANNED" # not knowing what runs, upload everything next time
 			event error "could not list containers via ${LABWARDEN_DOCKER_URL:-$LABWARDEN_DOCKER_SOCK}"
 			failed=$((failed + 1))
 		fi
+	else
+		# This run retires the targets of the images; upload them again
+		# when Docker scanning is back.
+		rm -f "$SCANNED"
 	fi
 
 	msg="scanned $scanned target(s) in $(($(date +%s) - _t0))s"

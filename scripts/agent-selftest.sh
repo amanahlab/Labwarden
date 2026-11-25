@@ -198,6 +198,7 @@ case "$1 $2" in
 "inspect --format")
 	case "$3" in "{{.Image}} {{.Id}} {{.Config.Image}}") grep "^$4 " "$STUB/containers" | awk '{print $2, $1, $3}' ;; *) exit 1 ;; esac ;;
 "image inspect") eval "n=\${$#}" && awk -v n="$n" '$3 == n {print $2}' "$STUB/containers" | head -n1 ;;
+"save -o") echo tar >"$3" ;;
 *) exit 1 ;;
 esac
 EOT
@@ -270,6 +271,23 @@ check "cache: a failed upload is cataloged again" 0 cataloged "docker:redis:7 "
 rm "$STUB/state/credential" "$STUB/state/credential.host"
 agent_run
 check "cache: enrolling again catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+# A rolling update: two running images under one name, which the dashboard
+# keeps one SBOM for. The one whose tag moved is scanned from an export.
+printf 'c1 sha256:i1 nginx:latest\nc2 sha256:i4 redis:7\nc3 sha256:i5 redis:7\n' >"$STUB/containers"
+redis_both() { [ "$(grep -c . "$STUB/cataloged")" = 2 ] && grep -qx docker:redis:7 "$STUB/cataloged" && grep -q '^docker-archive:' "$STUB/cataloged"; }
+agent_run
+check "cache: two running images under one name are both cataloged" 0 redis_both
+agent_run
+check "cache: images that share a name are cataloged on every run" 0 redis_both
+printf 'c1 sha256:i1 nginx:latest\nc3 sha256:i5 redis:7\n' >"$STUB/containers"
+agent_run
+check "cache: the image left under a shared name is cataloged again" 0 cataloged "docker:redis:7 "
+agent_run
+check "cache: then it is unchanged" 0 cataloged ""
+# Docker scanning paused for a run retires the images' targets.
+agent_run LABWARDEN_SCAN_DOCKER=false
+agent_run
+check "cache: images are cataloged again after a run without Docker scanning" 0 cataloged "docker:nginx:latest docker:redis:7 "
 rm -rf "$STUB"
 
 [ "$fails" -eq 0 ] || { echo "$fails check(s) failed" && exit 1; }
