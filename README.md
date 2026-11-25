@@ -119,6 +119,7 @@ Agent options (environment variables, or `/etc/labwarden/agent.env` on VMs):
 - `LABWARDEN_INTERVAL`
 - `LABWARDEN_SCHEDULE` (systemd `OnCalendar`)
 - `LABWARDEN_CRON`
+- `LABWARDEN_RESCAN_DAYS` (default `7`): a container image that hasn't changed since its last upload is cataloged again only after this many days (`0`: every run). The dashboard re-matches stored SBOMs against each new Grype DB, so new CVEs still appear; a target's "Last scanned" shows when it was last cataloged.
 
 ## Server configuration
 

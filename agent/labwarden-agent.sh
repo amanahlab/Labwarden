@@ -22,9 +22,11 @@
 #   LABWARDEN_INTERVAL     seconds between runs, reported so the dashboard can flag silent hosts
 #   LABWARDEN_STATE        directory for the host credential (default: /var/lib/labwarden)
 #   LABWARDEN_SPOOL        directory for SBOMs that failed to upload (default: $LABWARDEN_STATE/spool)
+#   LABWARDEN_RESCAN_DAYS  catalog an unchanged container image again after this many
+#                          days (default: 7; 0 catalogs every image on every run)
 set -u
 
-AGENT_VERSION="3.2.0"
+AGENT_VERSION="3.3.0"
 
 # The configuration is sourced as shell code, so only a file that nobody else
 # can have written is trusted: owned by root (or this user), not group- or
@@ -55,7 +57,10 @@ LABWARDEN_EXCLUDES=${LABWARDEN_EXCLUDES-./proc/** ./sys/** ./dev/** ./run/** ./t
 LABWARDEN_INTERVAL=${LABWARDEN_INTERVAL:-21600}
 LABWARDEN_STATE=${LABWARDEN_STATE:-/var/lib/labwarden}
 LABWARDEN_SPOOL=${LABWARDEN_SPOOL:-$LABWARDEN_STATE/spool}
+LABWARDEN_RESCAN_DAYS=${LABWARDEN_RESCAN_DAYS:-7}
 CRED_FILE="$LABWARDEN_STATE/credential"
+SCANNED="$LABWARDEN_STATE/scanned"
+TOOLS="$AGENT_VERSION" # agent and Syft version, set in main
 CRED=""
 SYFT=${SYFT:-syft}
 export SYFT_CHECK_FOR_APP_UPDATE=false
@@ -173,6 +178,7 @@ enroll() {
 	(umask 077 && printf '%s' "$_cred" >"$CRED_FILE.tmp" && printf '%s' "$LABWARDEN_HOST" >"$CRED_FILE.host") &&
 		mv "$CRED_FILE.tmp" "$CRED_FILE" || { log error "could not store the credential in $CRED_FILE" && return 1; }
 	CRED=$_cred
+	rm -f "$SCANNED" # a new credential: the dashboard may hold none of our SBOMs
 	log info "enrolled $LABWARDEN_HOST with the dashboard"
 }
 
@@ -326,6 +332,29 @@ export_container() { # export_container <container-id> <dir>: unpack its filesys
 	# needs them in a tree that is only cataloged.
 	find "$2" -type f \( -perm -4000 -o -perm -2000 \) -exec chmod ug-s {} + 2>/dev/null
 	[ -d "$2/etc" ] || [ -d "$2/usr" ]
+}
+
+# The container images uploaded on earlier runs, one per line:
+# "<image-id> <agent/syft version> <epoch> <name>". The dashboard keeps each
+# SBOM and matches it again against every new vulnerability DB, so an image
+# that has not changed since is not cataloged again until its entry is
+# LABWARDEN_RESCAN_DAYS old. Each run rewrites the file with only the images it
+# still runs, so an image that comes back after a pause is uploaded again.
+
+# unchanged <image-id> <name>: true when this image was uploaded recently.
+unchanged() {
+	case "$LABWARDEN_RESCAN_DAYS" in "" | 0 | *[!0-9]*) return 1 ;; esac
+	[ -f "$SCANNED" ] || return 1
+	awk -v id="$1" -v v="$TOOLS" -v n="$2" -v min=$(($(date +%s) - LABWARDEN_RESCAN_DAYS * 86400)) \
+		'$1 == id && $2 == v && $3 >= min && $4 == n {f = 1} END {exit !f}' "$SCANNED"
+}
+
+# keep_scanned <image-id> <name> [epoch]: list the image in this run's file,
+# with its upload time (now, or the earlier upload it was skipped for).
+keep_scanned() {
+	_at=${3:-}
+	[ -n "$_at" ] || _at=$(awk -v id="$1" -v n="$2" '$1 == id && $4 == n {print $3; exit}' "$SCANNED" 2>/dev/null)
+	printf '%s %s %s %s\n' "$1" "$TOOLS" "${_at:-0}" "$2" >>"$SCANNED.new"
 }
 
 # scan_image <image-id> <container-id> <name>. In order of preference:
@@ -494,7 +523,9 @@ main() {
 
 	LOWER=$(lower_cmd)
 	_t0=$(date +%s)
-	_started="scan run started (agent $AGENT_VERSION, $($SYFT version 2>/dev/null | awk '/^Version:/{print "syft " $2}'))"
+	_syft=$($SYFT version 2>/dev/null | awk '/^Version:/{print $2}')
+	TOOLS="$AGENT_VERSION/${_syft:-unknown}"
+	_started="scan run started (agent $AGENT_VERSION, syft ${_syft:-unknown})"
 	run_status started "$_started"
 	# A credential that was reset, or a dashboard rebuilt from scratch: enroll again, once.
 	if [ "$_code" = 401 ] && [ -n "$CRED" ]; then
@@ -508,6 +539,7 @@ main() {
 
 	failed=0
 	scanned=0
+	skipped=0
 	targets=""
 	add_target() { targets="$targets$(json_str "$1"),"; }
 
@@ -524,19 +556,32 @@ main() {
 			log warn "could not list the running containers for the Images page"
 		fi
 		if docker_images >"$WORK/images.txt"; then
+			: >"$SCANNED.new"
 			while read -r id cid name; do
 				[ -n "$id" ] || continue
 				case "$name" in "" | sha256:*) name=$(printf '%.12s' "${id#sha256:}") ;; esac
 				add_target "$name"
-				if scan_image "$id" "$cid" "$name"; then scanned=$((scanned + 1)); else failed=$((failed + 1)); fi
+				if unchanged "$id" "$name"; then
+					log info "$name has not changed since its last upload; not cataloged again"
+					keep_scanned "$id" "$name"
+					skipped=$((skipped + 1))
+				elif scan_image "$id" "$cid" "$name"; then
+					keep_scanned "$id" "$name" "$(date +%s)"
+					scanned=$((scanned + 1))
+				else
+					failed=$((failed + 1))
+				fi
 			done <"$WORK/images.txt"
+			mv "$SCANNED.new" "$SCANNED"
 		else
+			rm -f "$SCANNED" # not knowing what runs, upload everything next time
 			event error "could not list containers via ${LABWARDEN_DOCKER_URL:-$LABWARDEN_DOCKER_SOCK}"
 			failed=$((failed + 1))
 		fi
 	fi
 
 	msg="scanned $scanned target(s) in $(($(date +%s) - _t0))s"
+	[ "$skipped" -eq 0 ] || msg="$msg, $skipped unchanged"
 	if [ "$failed" -gt 0 ]; then
 		msg="$msg, $failed failed"
 		run_status error "$msg" "[${targets%,}]" "$images" || log error "could not report run status"
