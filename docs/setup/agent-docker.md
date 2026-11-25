@@ -9,6 +9,7 @@ The Docker agent scans **containers only**, not the host's own packages. To scan
 - A Docker host with **Docker Compose v2**, on amd64 or arm64.
 - Network access to the dashboard. Use its **`https://`** address: set up HTTPS first (see the [Compose guide](server-docker-compose.md), [Caddy](reverse-proxy-caddy.md) or [nginx](reverse-proxy-nginx.md)).
 - An enrollment token from **Settings → Enrollment tokens**, with a short expiry and a host limit.
+- Room for a scan. Each image takes seconds to about half a minute and up to about 1 GB of memory for a large image, and free disk in the agent's volume about the size of the largest image.
 
 ## How it reaches Docker safely
 
@@ -57,6 +58,8 @@ services:
     cap_drop: [ALL]
     cap_add: [DAC_OVERRIDE]         # unpack container filesystems
     security_opt: [no-new-privileges:true]
+    cpu_shares: 256                 # yields CPU to other containers when the host is busy
+    # cpus: "1"                     # optional hard cap: scans take about twice as long
     environment:
       LABWARDEN_URL: https://labwarden.example.lan
       LABWARDEN_TOKEN: ${LABWARDEN_TOKEN:-}

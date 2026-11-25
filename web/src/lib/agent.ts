@@ -26,7 +26,7 @@ echo "${opts.sha256 || "<sha256>"}  lw-install.sh" | sha256sum -c
 sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=${token} LABWARDEN_GROUP=homelab sh lw-install.sh`,
     docker: `docker run -d --name labwarden-agent --restart unless-stopped \\
   --read-only --tmpfs /tmp --cap-drop ALL --cap-add DAC_OVERRIDE \\
-  --security-opt no-new-privileges:true \\
+  --security-opt no-new-privileges:true --cpu-shares 256 \\
   -v /var/run/docker.sock:/var/run/docker.sock:ro \\
   -v labwarden-agent-db:/var/lib/labwarden \\
   -e LABWARDEN_URL=${url} -e LABWARDEN_TOKEN=${token} \\
@@ -49,6 +49,8 @@ sudo LABWARDEN_URL=${url} LABWARDEN_TOKEN=${token} LABWARDEN_GROUP=homelab sh lw
     cap_drop: [ALL]
     cap_add: [DAC_OVERRIDE]         # unpack container filesystems
     security_opt: [no-new-privileges:true]
+    cpu_shares: 256                 # yields CPU to other containers when the host is busy
+    # cpus: "1"                     # optional hard cap: scans take about twice as long
     environment:
       LABWARDEN_URL: ${url}
       LABWARDEN_TOKEN: ${token}

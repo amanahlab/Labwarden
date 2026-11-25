@@ -11,6 +11,7 @@ If Docker is installed on the machine, the same agent also scans the images of i
 - **systemd** or **cron**. The installer uses a systemd timer when it can, and cron otherwise.
 - Network access to the dashboard. Use its **`https://`** address: set up HTTPS first (see the [Compose guide](server-docker-compose.md), [Caddy](reverse-proxy-caddy.md) or [nginx](reverse-proxy-nginx.md)).
 - Internet access from the machine, once, to download Syft from GitHub.
+- Room for a scan. A run takes a few minutes at low priority, and Syft needs from a few hundred MB of memory on a small VM to about 3 GB for a machine with millions of files. Scanning Docker images also needs free disk in `/var/tmp` about the size of the largest image.
 
 ## 1. Create an enrollment token
 
