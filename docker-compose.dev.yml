@@ -62,6 +62,7 @@ services:
     cap_add: [DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
     tmpfs: [/tmp:size=64m]
+    cpu_shares: 256
     environment:
       LABWARDEN_URL: http://labwarden:8080
       LABWARDEN_TOKEN: ${LABWARDEN_INGEST_TOKEN:?run scripts/dev-env.sh first}

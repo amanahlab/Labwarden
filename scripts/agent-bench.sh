@@ -12,6 +12,7 @@
 #                   read-only) (default: testbed-vm)
 #   BENCH_VARIANTS  space-separated name[:VAR=value[,VAR=value...]] Syft settings
 #   BENCH_CPUS      space-separated CPU limits, 0 = none (default: "0 2")
+#   BENCH_RUN_ARGS  extra docker run arguments for every run, e.g. "--memory 1g"
 #   BENCH_OUT       results directory (default: bench/, gitignored)
 # Prints one tab-separated row per run and keeps every SBOM for a findings diff.
 set -eu
@@ -22,6 +23,7 @@ IMAGES=${BENCH_IMAGES-python:3.13 node:24 postgres:17 homeassistant/home-assista
 DIRS=${BENCH_DIRS-testbed-vm}
 VARIANTS=${BENCH_VARIANTS:-default p1:SYFT_PARALLELISM=1 p2:SYFT_PARALLELISM=2 p4:SYFT_PARALLELISM=4 nofiles:SYFT_FILE_METADATA_SELECTION=none}
 CPUS=${BENCH_CPUS:-0 2}
+RUN_ARGS=${BENCH_RUN_ARGS:-}
 OUT=${BENCH_OUT:-$ROOT/bench}
 AGENT=labwarden-agent:bench
 # The agent's default excludes for a scan of /.
@@ -31,7 +33,7 @@ mkdir -p "$OUT/img" "$OUT/sbom"
 docker build -q -t "$AGENT" agent >/dev/null
 
 # Runs inside the agent image: syft on $SRC, sampling its peak RSS. Prints
-# "wall_s cpu_s rss_mb cgroup_peak_mb sbom_kb sbom_gz_kb rc".
+# "wall_s cpu_s rss_mb cgroup_peak_mb sbom_kb sbom_gz_kb rc oom_kills".
 # shellcheck disable=SC2016
 MEASURE='
 read -r u0 _ </proc/uptime
@@ -50,8 +52,9 @@ wait $pid && rc=0 || rc=$?
 read -r u1 _ </proc/uptime
 c1=$(sed -n "s/^usage_usec //p" /sys/fs/cgroup/cpu.stat)
 peak=$(cat /sys/fs/cgroup/memory.peak)
-echo "$u0 $u1 $c0 $c1 $hwm $peak $(wc -c </out/sbom.json) $(gzip -c /out/sbom.json | wc -c) $rc" |
-	awk "{printf \"%.1f %.1f %d %d %d %d %d\n\", \$2-\$1, (\$4-\$3)/1e6, \$5/1024, \$6/1048576, \$7/1024, \$8/1024, \$9}"
+oom=$(sed -n "s/^oom_kill //p" /sys/fs/cgroup/memory.events)
+echo "$u0 $u1 $c0 $c1 $hwm $peak $(wc -c </out/sbom.json) $(gzip -c /out/sbom.json | wc -c) $rc ${oom:-0}" |
+	awk "{printf \"%.1f %.1f %d %d %d %d %d %d\n\", \$2-\$1, (\$4-\$3)/1e6, \$5/1024, \$6/1048576, \$7/1024, \$8/1024, \$9, \$10}"
 '
 
 # measure <target> <syft-source> <variant> <cpus> [docker run args]
@@ -71,9 +74,9 @@ measure() {
 	_set=""
 	for e in $_envs; do _set="$_set -e $e"; done
 	# shellcheck disable=SC2086
-	_row=$(docker run --rm $_lim $_set "$@" -e SRC="$_src" -e EXCLUDES="$EXCLUDES" \
+	_row=$(docker run --rm $_lim $RUN_ARGS $_set "$@" -e SRC="$_src" -e EXCLUDES="$EXCLUDES" \
 		-e TMPDIR=/t -e SYFT_CHECK_FOR_APP_UPDATE=false -v "$_tmp:/t" -v "$_run:/out" \
-		--entrypoint sh "$AGENT" -c "$MEASURE") || _row="- - - - - - fail"
+		--entrypoint sh "$AGENT" -c "$MEASURE") || _row="- - - - - - fail -"
 	_tp=$(docker logs "$_side" 2>/dev/null | awk '$1 > m {m = $1} END {print int(m / 1024)}')
 	docker rm -f "$_side" >/dev/null
 	docker volume rm -f "$_tmp" >/dev/null
@@ -81,13 +84,13 @@ measure() {
 	[ -s "$_run/syft.err" ] && { echo "syft stderr for $_t ($_name):" >&2; tail -c 400 "$_run/syft.err" >&2; }
 	# shellcheck disable=SC2086
 	set -- $_row
-	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "$_name" "$_c" "$1" "$2" "$3" "$4" "$_tp" "$5" "$6" "$7" | tee -a "$RESULTS"
+	printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$_t" "$_name" "$_c" "$1" "$2" "$3" "$4" "$_tp" "$5" "$6" "$7" "$8" | tee -a "$RESULTS"
 }
 
 RESULTS="$OUT/results-$(date -u +%Y%m%dT%H%M%SZ).tsv"
 {
-	echo "# host: $(nproc) CPUs, $(awk '/MemTotal/{printf "%d MB", $2/1024}' /proc/meminfo); syft: $(docker run --rm --entrypoint syft "$AGENT" version | awk '/^Version:/{print $2}')"
-	printf 'target\tvariant\tcpus\twall_s\tcpu_s\trss_mb\tcgroup_peak_mb\ttmp_peak_mb\tsbom_kb\tsbom_gz_kb\trc\n'
+	echo "# host: $(nproc) CPUs, $(awk '/MemTotal/{printf "%d MB", $2/1024}' /proc/meminfo); syft: $(docker run --rm --entrypoint syft "$AGENT" version | awk '/^Version:/{print $2}')${RUN_ARGS:+; docker run $RUN_ARGS}"
+	printf 'target\tvariant\tcpus\twall_s\tcpu_s\trss_mb\tcgroup_peak_mb\ttmp_peak_mb\tsbom_kb\tsbom_gz_kb\trc\toom_kills\n'
 } | tee "$RESULTS"
 
 for img in $IMAGES; do

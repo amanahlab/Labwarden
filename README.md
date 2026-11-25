@@ -70,6 +70,16 @@ Settings are optional. They go in a `.env` file next to `docker-compose.yml`; [`
 
 **Sizing.** Measured on 6 CPUs and 8 GB of RAM: the queue picks a job up within about 100 ms (p99) and handles about 300 jobs a second, so Grype is the limit. Matching an SBOM takes 1–2.5 s once the DB is in memory, with about 115 MB per Grype process. The first matches after a restart or a new DB take longer (up to about 25 s for a full VM) while the DB is read from disk. With `LABWARDEN_SCAN_WORKERS=2`, re-matching 500 targets takes about 10 minutes.
 
+**Agent cost.** A run is a burst, then nothing until the next one. Measured on 6 CPUs with Syft 1.57 and the agent's defaults (no file hashes, `GOGC=50` for Syft):
+
+| Target | Time | Syft memory | Temporary disk |
+|---|---|---|---|
+| `postgres:17` / `python:3.13` image | 5–16 s | 0.2–0.4 GB | about the image size |
+| `homeassistant/home-assistant` image (3.4 GB) | 26 s | 0.9 GB | about the image size |
+| `/` of a busy dev machine (35 GB of home directories) | 3 min | 2.7 GB | none |
+
+An image scan also costs Docker about half as much CPU again, exporting the image. Memory grows with the number of files scanned, so a fixed memory limit would fail the largest targets on every run. Lower priority comes from `Nice=10`, the idle I/O class and `CPUWeight=20` on systemd, from `nice` under cron, and from `cpu_shares: 256` in the Docker snippets (`cpus: "1"` caps it hard, at about twice the scan time). `scripts/agent-bench.sh` repeats the measurements.
+
 ### How SBOMs and logs are shipped
 
 0. On its first run the agent enrolls: `POST /api/v1/ingest/enroll {host}` with an **enrollment token** returns a **host credential** (`vxa_…`) bound to that host name. The agent keeps it in `/var/lib/labwarden/credential` (mode 0600) and sends it on every later request. A host that already has a credential cannot enroll again (`409`) until you reset it on its host page; a credential the server no longer knows (`401`) makes the agent re-enroll once.
@@ -101,6 +111,7 @@ sudo sh lw-install.sh --uninstall
 # Docker host (the Compose snippet in Settings adds a read-only socket proxy)
 docker run -d --name labwarden-agent --restart unless-stopped \
   --read-only --tmpfs /tmp --cap-drop ALL --cap-add DAC_OVERRIDE --security-opt no-new-privileges:true \
+  --cpu-shares 256 \
   -v /var/run/docker.sock:/var/run/docker.sock:ro -v labwarden-agent-db:/var/lib/labwarden \
   -e LABWARDEN_URL=http://labwarden.lan:8080 -e LABWARDEN_TOKEN=<token> -e LABWARDEN_HOST=$(hostname) \
   ghcr.io/amanahlab/labwarden-agent:0.2.1@sha256:68b4454fb1ddb3489cab42079537448ccd2daabe5343fa41af8c19413b38eedd
