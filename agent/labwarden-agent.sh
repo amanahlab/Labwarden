@@ -60,7 +60,7 @@ LABWARDEN_SPOOL=${LABWARDEN_SPOOL:-$LABWARDEN_STATE/spool}
 LABWARDEN_RESCAN_DAYS=${LABWARDEN_RESCAN_DAYS:-7}
 CRED_FILE="$LABWARDEN_STATE/credential"
 SCANNED="$LABWARDEN_STATE/scanned"
-TOOLS="$AGENT_VERSION" # agent and Syft version, set in main
+TOOLS="$AGENT_VERSION" # agent and Syft version and file selection, set in main
 CRED=""
 SYFT=${SYFT:-syft}
 export SYFT_CHECK_FOR_APP_UPDATE=false
@@ -535,7 +535,8 @@ main() {
 	LOWER=$(lower_cmd)
 	_t0=$(date +%s)
 	_syft=$($SYFT version 2>/dev/null | awk '/^Version:/{print $2}')
-	TOOLS="$AGENT_VERSION/${_syft:-unknown}"
+	# One field of the cache line: no spaces.
+	TOOLS="$AGENT_VERSION/${_syft:-unknown}/$(printf '%s' "$SYFT_FILE_METADATA_SELECTION" | tr -c 'A-Za-z0-9_-' '_')"
 	_started="scan run started (agent $AGENT_VERSION, syft ${_syft:-unknown})"
 	run_status started "$_started"
 	# A credential that was reset, or a dashboard rebuilt from scratch: enroll again, once.

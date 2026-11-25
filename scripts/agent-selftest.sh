@@ -257,6 +257,10 @@ check "cache: an expired image is cataloged" 0 cataloged "docker:redis:7 "
 echo 1.1.0 >"$STUB/syft-version"
 agent_run
 check "cache: a new Syft catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+agent_run SYFT_FILE_METADATA_SELECTION="owned-by-package x"
+check "cache: another Syft file selection catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+agent_run
+check "cache: back to the default file selection catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
 printf 'c1 sha256:i1 nginx:latest\nc2 sha256:i4 redis:7\n' >"$STUB/containers"
 touch "$STUB/fail"
 agent_run
