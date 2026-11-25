@@ -11,6 +11,8 @@
 #                   (the testbed VM's filesystem) and/or "host" (this machine's /,
 #                   read-only) (default: testbed-vm)
 #   BENCH_VARIANTS  space-separated name[:VAR=value[,VAR=value...]] Syft settings
+#                   (default includes "default", Syft's own, and "agent", what
+#                   the agent ships)
 #   BENCH_CPUS      space-separated CPU limits, 0 = none (default: "0 2")
 #   BENCH_RUN_ARGS  extra docker run arguments for every run, e.g. "--memory 1g"
 #   BENCH_OUT       results directory (default: bench/, gitignored)
@@ -21,7 +23,7 @@ cd "$ROOT"
 
 IMAGES=${BENCH_IMAGES-python:3.13 node:24 postgres:17 homeassistant/home-assistant:stable labwarden-testbed-workload:latest}
 DIRS=${BENCH_DIRS-testbed-vm}
-VARIANTS=${BENCH_VARIANTS:-default p1:SYFT_PARALLELISM=1 p2:SYFT_PARALLELISM=2 p4:SYFT_PARALLELISM=4 nofiles:SYFT_FILE_METADATA_SELECTION=none}
+VARIANTS=${BENCH_VARIANTS:-default agent:SYFT_FILE_METADATA_SELECTION=none,GOGC=50 p1:SYFT_PARALLELISM=1 p2:SYFT_PARALLELISM=2 p4:SYFT_PARALLELISM=4 nofiles:SYFT_FILE_METADATA_SELECTION=none}
 CPUS=${BENCH_CPUS:-0 2}
 RUN_ARGS=${BENCH_RUN_ARGS:-}
 OUT=${BENCH_OUT:-$ROOT/bench}
@@ -30,6 +32,16 @@ AGENT=labwarden-agent:bench
 EXCLUDES='./proc/** ./sys/** ./dev/** ./run/** ./tmp/** ./var/lib/docker/** ./var/lib/containerd/** ./var/lib/labwarden/** ./snap/** ./mnt/** ./media/**'
 
 mkdir -p "$OUT/img" "$OUT/sbom"
+
+# An interrupted run leaves no container or volume behind.
+_tmp=labwarden-bench-tmp-$$ _side="" _runc=labwarden-bench-run-$$
+cleanup() {
+	docker rm -f "$_runc" ${_side:+"$_side"} >/dev/null 2>&1 || :
+	docker volume rm -f "$_tmp" >/dev/null 2>&1 || :
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 docker build -q -t "$AGENT" agent >/dev/null
 
 # Runs inside the agent image: syft on $SRC, sampling its peak RSS. Prints
@@ -65,7 +77,6 @@ measure() {
 	case "$_v" in *:*) _envs=$(printf '%s' "${_v#*:}" | tr ',' ' ') ;; esac
 	_lim=""
 	[ "$_c" = 0 ] || _lim="--cpus $_c"
-	_tmp=labwarden-bench-tmp-$$
 	_run="$OUT/run"
 	rm -rf "$_run" && mkdir -p "$_run"
 	docker volume create "$_tmp" >/dev/null
@@ -74,11 +85,12 @@ measure() {
 	_set=""
 	for e in $_envs; do _set="$_set -e $e"; done
 	# shellcheck disable=SC2086
-	_row=$(docker run --rm $_lim $RUN_ARGS $_set "$@" -e SRC="$_src" -e EXCLUDES="$EXCLUDES" \
+	_row=$(docker run --rm --init --name "$_runc" $_lim $RUN_ARGS $_set "$@" -e SRC="$_src" -e EXCLUDES="$EXCLUDES" \
 		-e TMPDIR=/t -e SYFT_CHECK_FOR_APP_UPDATE=false -v "$_tmp:/t" -v "$_run:/out" \
 		--entrypoint sh "$AGENT" -c "$MEASURE") || _row="- - - - - - fail -"
 	_tp=$(docker logs "$_side" 2>/dev/null | awk '$1 > m {m = $1} END {print int(m / 1024)}')
 	docker rm -f "$_side" >/dev/null
+	_side=""
 	docker volume rm -f "$_tmp" >/dev/null
 	[ -s "$_run/sbom.json" ] && mv "$_run/sbom.json" "$OUT/sbom/$(printf '%s' "$_t" | tr '/:' '__').$_name.cpu$_c.json"
 	[ -s "$_run/syft.err" ] && { echo "syft stderr for $_t ($_name):" >&2; tail -c 400 "$_run/syft.err" >&2; }
@@ -96,8 +108,13 @@ RESULTS="$OUT/results-$(date -u +%Y%m%dT%H%M%SZ).tsv"
 for img in $IMAGES; do
 	docker image inspect "$img" >/dev/null 2>&1 || docker pull -q "$img" >/dev/null
 	echo "# $img = $(docker image inspect --format '{{.Id}} {{join .RepoDigests " "}}' "$img")" | tee -a "$RESULTS"
-	tar="$OUT/img/$(printf '%s' "$img" | tr '/:' '__').tar"
-	[ -s "$tar" ] || docker save -o "$tar" "$img"
+	# The tar is keyed by image ID, so a tag that moved is saved again.
+	base="$OUT/img/$(printf '%s' "$img" | tr '/:' '__')"
+	tar="$base.$(docker image inspect --format '{{.Id}}' "$img" | sed 's/^sha256://' | cut -c1-12).tar"
+	if [ ! -s "$tar" ]; then
+		rm -f "$base".*.tar
+		docker save -o "$tar.part" "$img" && mv "$tar.part" "$tar"
+	fi
 	for c in $CPUS; do
 		for v in $VARIANTS; do
 			measure "$img" "docker-archive:/img/$(basename "$tar")" "$v" "$c" -v "$OUT/img:/img:ro"
@@ -111,12 +128,14 @@ for d in $DIRS; do
 	testbed-vm)
 		docker build -q -t labwarden-bench-vm testbed/vm >/dev/null
 		vol=labwarden-bench-rootfs
-		if ! docker run --rm -v "$vol:/r" alpine:3.24 test -d /r/testbed-vm; then
+		# The unpacked filesystem is keyed by image ID, so a rebuilt VM is unpacked again.
+		fs=testbed-vm-$(docker image inspect --format '{{.Id}}' labwarden-bench-vm | sed 's/^sha256://' | cut -c1-12)
+		if ! docker run --rm -v "$vol:/r" alpine:3.24 test -f "/r/$fs.done"; then
 			cid=$(docker create labwarden-bench-vm)
-			docker export "$cid" | docker run --rm -i -v "$vol:/r" alpine:3.24 sh -c 'mkdir -p /r/testbed-vm && tar -xf - -C /r/testbed-vm'
+			docker export "$cid" | docker run --rm -i -v "$vol:/r" alpine:3.24 sh -c "rm -rf /r/* && mkdir /r/$fs && tar -xf - -C /r/$fs && touch /r/$fs.done"
 			docker rm "$cid" >/dev/null
 		fi
-		src=dir:/r/testbed-vm args="-v $vol:/r:ro"
+		src=dir:/r/$fs args="-v $vol:/r:ro"
 		;;
 	*) echo "unknown BENCH_DIRS entry: $d" >&2 && exit 2 ;;
 	esac
