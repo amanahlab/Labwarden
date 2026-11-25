@@ -59,6 +59,14 @@ CRED_FILE="$LABWARDEN_STATE/credential"
 CRED=""
 SYFT=${SYFT:-syft}
 export SYFT_CHECK_FOR_APP_UPDATE=false
+# Syft hashes every file a package owns by default. The dashboard's Grype
+# matching never uses those hashes (identical findings without them), and
+# skipping them saves 10-30% of the CPU and 10-40% of the SBOM size.
+SYFT_FILE_METADATA_SELECTION=${SYFT_FILE_METADATA_SELECTION:-none}
+export SYFT_FILE_METADATA_SELECTION
+# Syft's Go garbage collector runs twice as often: about a third less memory
+# on a large filesystem for about a seventh more CPU. Only Syft gets it.
+SYFT_GOGC=${GOGC:-50}
 # syft's docker: source and the docker CLI reach the engine through DOCKER_HOST.
 if [ -n "$LABWARDEN_DOCKER_URL" ]; then DOCKER_HOST=$LABWARDEN_DOCKER_URL; else DOCKER_HOST="unix://$LABWARDEN_DOCKER_SOCK"; fi
 export DOCKER_HOST
@@ -411,9 +419,11 @@ spool() { # spool <gz-file> <query>
 	ls -1t "$LABWARDEN_SPOOL"/*.gz 2>/dev/null | tail -n +21 | while read -r old; do rm -f "$old" "${old%.*.gz}.query"; done
 }
 
-# lower_cmd: the command prefix that runs a scan below everything else on the
-# host (CPU and I/O), unless whoever started the agent already lowered it: the
-# systemd unit sets Nice=10 and the idle I/O class.
+# lower_cmd: the command prefix that runs a scan at low CPU and I/O priority,
+# unless whoever started the agent already lowered it (the systemd unit sets
+# Nice=10 and the idle I/O class). Priority only ranks processes within one
+# cgroup: it matters for the cron agent, while a Docker agent yields to other
+# containers through its cpu_shares (see the Compose snippet).
 lower_cmd() {
 	[ "$(nice 2>/dev/null)" = 0 ] || return 0
 	printf 'nice -n 10'
@@ -430,7 +440,7 @@ scan() {
 	_excl=""
 	case "$_src" in dir:*) for e in $LABWARDEN_EXCLUDES; do _excl="$_excl --exclude $e"; done ;; esac
 	# shellcheck disable=SC2086
-	if ! $LOWER "$SYFT" scan "$_src" -o syft-json -q $_excl >"$WORK/sbom.json" 2>"$WORK/syft.err"; then
+	if ! GOGC=$SYFT_GOGC $LOWER "$SYFT" scan "$_src" -o syft-json -q $_excl >"$WORK/sbom.json" 2>"$WORK/syft.err"; then
 		set +f
 		event error "syft failed on $_name: $(tail -c 800 "$WORK/syft.err")"
 		return 1
