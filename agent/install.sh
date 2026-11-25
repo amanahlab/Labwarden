@@ -187,12 +187,21 @@ Type=oneshot
 ExecStart=/usr/local/bin/labwarden-agent
 Nice=10
 IOSchedulingClass=idle
+# A background job: when the host is busy, it gets a small share of CPU and
+# disk. Soft weights, not hard limits, so an idle host still scans at full speed.
+CPUWeight=20
+IOWeight=20
 TimeoutStartSec=2h
 # Root is needed to read every file and the Docker socket, nothing more:
 # read-only everywhere except the agent's state, no privilege gain.
 # CAP_DAC_OVERRIDE lets it unpack a container filesystem with read-only
-# directories into its private /tmp.
+# directories into its private /var/tmp.
 Environment=XDG_CACHE_HOME=/var/lib/labwarden/cache
+# Image exports and Syft's unpacked layers go to the private /var/tmp, on disk
+# (the private /tmp sits in the host's /tmp, a tmpfs on Debian 13, Fedora and
+# Arch, which would hold them in RAM).
+# systemd removes it when the run ends.
+Environment=TMPDIR=/var/tmp
 ReadWritePaths=/var/lib/labwarden
 ProtectSystem=strict
 ProtectHome=read-only

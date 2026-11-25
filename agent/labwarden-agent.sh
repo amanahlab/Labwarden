@@ -24,7 +24,7 @@
 #   LABWARDEN_SPOOL        directory for SBOMs that failed to upload (default: $LABWARDEN_STATE/spool)
 set -u
 
-AGENT_VERSION="3.1.0"
+AGENT_VERSION="3.2.0"
 
 # The configuration is sourced as shell code, so only a file that nobody else
 # can have written is trusted: owned by root (or this user), not group- or
@@ -411,6 +411,16 @@ spool() { # spool <gz-file> <query>
 	ls -1t "$LABWARDEN_SPOOL"/*.gz 2>/dev/null | tail -n +21 | while read -r old; do rm -f "$old" "${old%.*.gz}.query"; done
 }
 
+# lower_cmd: the command prefix that runs a scan below everything else on the
+# host (CPU and I/O), unless whoever started the agent already lowered it: the
+# systemd unit sets Nice=10 and the idle I/O class.
+lower_cmd() {
+	[ "$(nice 2>/dev/null)" = 0 ] || return 0
+	printf 'nice -n 10'
+	ionice -c 3 true 2>/dev/null && printf ' ionice -c 3'
+	return 0
+}
+
 # scan <syft-source> <target-name>
 scan() {
 	_src=$1 _name=$2
@@ -420,7 +430,7 @@ scan() {
 	_excl=""
 	case "$_src" in dir:*) for e in $LABWARDEN_EXCLUDES; do _excl="$_excl --exclude $e"; done ;; esac
 	# shellcheck disable=SC2086
-	if ! "$SYFT" scan "$_src" -o syft-json -q $_excl >"$WORK/sbom.json" 2>"$WORK/syft.err"; then
+	if ! $LOWER "$SYFT" scan "$_src" -o syft-json -q $_excl >"$WORK/sbom.json" 2>"$WORK/syft.err"; then
 		set +f
 		event error "syft failed on $_name: $(tail -c 800 "$WORK/syft.err")"
 		return 1
@@ -482,6 +492,7 @@ main() {
 		exit 1
 	fi
 
+	LOWER=$(lower_cmd)
 	_t0=$(date +%s)
 	_started="scan run started (agent $AGENT_VERSION, $($SYFT version 2>/dev/null | awk '/^Version:/{print "syft " $2}'))"
 	run_status started "$_started"

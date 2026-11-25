@@ -117,7 +117,7 @@ The agent runs as root (it has to read the whole filesystem and, optionally, Doc
 - **The systemd service runs in a sandbox.** On systemd hosts the agent service:
   - cannot gain new privileges
   - sees most of the filesystem as read-only (only `/var/lib/labwarden` is writable)
-  - gets a private `/tmp`
+  - gets a private `/tmp` and `/var/tmp`, removed when the run ends (scan files go to the private `/var/tmp`, on disk)
   - cannot change kernel settings or modules
   - can only use ordinary network and local sockets
   - runs with a reduced set of root capabilities

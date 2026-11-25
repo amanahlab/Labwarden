@@ -141,6 +141,16 @@ check "the second run left them out" 1 grep -q images "$WORK/sent1.json"
 check "the fallback was logged" 0 grep -q "^warn .*without it" "$WORK/log"
 rm -rf "$WORK"
 
+# The scan runs at a lower priority, unless the scheduler already lowered the
+# agent (the systemd unit sets Nice=10).
+lc=$(sed -n '/^lower_cmd()/,/^}/p' agent/labwarden-agent.sh)
+check "lower_cmd lowers a normal-priority agent" 0 sh -c "$lc
+case \"\$(lower_cmd)\" in 'nice -n 10' | 'nice -n 10 ionice -c 3') ;; *) exit 1 ;; esac"
+check "lower_cmd leaves an already lowered agent alone" 0 nice -n 10 sh -c "$lc
+[ -z \"\$(lower_cmd)\" ]"
+check "a lowered command still runs" 0 sh -c "$lc
+\$(lower_cmd) true"
+
 # A restarted container often hands the new run the pid of the run that was
 # killed holding the lock; exec keeps $$, so the lock names the agent itself.
 check "a lock holding the agent's own pid is stale" 0 sh -c '
