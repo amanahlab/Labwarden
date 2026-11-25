@@ -348,7 +348,8 @@ export_container() { # export_container <container-id> <dir>: unpack its filesys
 # that has not changed since is not cataloged again until its entry is
 # LABWARDEN_RESCAN_DAYS old. Each run rewrites the file with only the images it
 # still runs, so an image that comes back after a pause is uploaded again; a
-# run without Docker scanning removes it.
+# run without Docker scanning, or a spooled upload that went through late,
+# removes it.
 
 # unchanged <image-id> <name>: true when this image was uploaded recently.
 unchanged() {
@@ -435,6 +436,9 @@ flush_spool() {
 		_base=${f%.sbom.gz}
 		if upload "$f" "$(cat "$_base.query")" 2>/dev/null; then
 			rm -f "$f" "$_base.query"
+			# It replaced whatever the dashboard held under its name, maybe a
+			# newer image's SBOM: catalog every image again this run.
+			rm -f "$SCANNED"
 			event info "uploaded spooled SBOM $(basename "$f")"
 		elif [ $? -eq 2 ]; then
 			rm -f "$f" "$_base.query" # would block every newer spooled upload forever

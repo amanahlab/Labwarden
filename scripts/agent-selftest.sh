@@ -216,7 +216,9 @@ while [ $# -gt 0 ]; do
 done
 case "$url" in
 */ingest/enroll) printf '{"credential":"vxa_new"}' >"$out" && printf 201 && exit 0 ;;
-*/ingest/sbom*) [ -e "$STUB/fail" ] && { [ -n "$w" ] && printf 503; exit 22; } ;;
+*/ingest/sbom*)
+	[ -e "$STUB/fail-once" ] && rm "$STUB/fail-once" && { [ -n "$w" ] && printf 503; exit 22; }
+	[ -e "$STUB/fail" ] && { [ -n "$w" ] && printf 503; exit 22; } ;;
 esac
 [ -n "$w" ] && printf 202
 exit 0
@@ -266,6 +268,7 @@ printf 'c1 sha256:i1 nginx:latest\nc2 sha256:i4 redis:7\n' >"$STUB/containers"
 touch "$STUB/fail"
 agent_run
 rm "$STUB/fail"
+rm -r "$STUB/state/spool" # its upload would catalog every image (tested below)
 agent_run
 check "cache: a failed upload is cataloged again" 0 cataloged "docker:redis:7 "
 rm "$STUB/state/credential" "$STUB/state/credential.host"
@@ -288,6 +291,18 @@ check "cache: then it is unchanged" 0 cataloged ""
 agent_run LABWARDEN_SCAN_DOCKER=false
 agent_run
 check "cache: images are cataloged again after a run without Docker scanning" 0 cataloged "docker:nginx:latest docker:redis:7 "
+# A spooled SBOM that reaches the dashboard late replaces the newer one under
+# its name, so the images are cataloged again after it.
+printf 'c1 sha256:i1 nginx:latest\nc3 sha256:i6 redis:7\n' >"$STUB/containers"
+touch "$STUB/fail"
+agent_run
+rm "$STUB/fail"
+printf 'c1 sha256:i1 nginx:latest\nc3 sha256:i7 redis:7\n' >"$STUB/containers"
+touch "$STUB/fail-once" # the spooled upload fails, the newer image's goes through
+agent_run
+check "cache: a spooled upload that fails again stays spooled" 0 test -n "$(ls "$STUB/state/spool")"
+agent_run
+check "cache: images are cataloged again after a late spooled upload" 0 cataloged "docker:nginx:latest docker:redis:7 "
 rm -rf "$STUB"
 
 [ "$fails" -eq 0 ] || { echo "$fails check(s) failed" && exit 1; }
