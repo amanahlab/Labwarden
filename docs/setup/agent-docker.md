@@ -50,7 +50,7 @@ services:
   labwarden-agent:
     # Release tag + multi-arch index digest. The Settings snippet always has
     # the one that matches your dashboard.
-    image: ghcr.io/amanahlab/labwarden-agent:0.3.0@sha256:d7711898b14e2df6a43130621bb1421aba3d1c6c76cfd8fda864dd5e4f142f4b
+    image: ghcr.io/amanahlab/labwarden-agent:0.4.0@sha256:9d5f21ef1550e0c0b8446d99692a0cef9f845bc6a57905ab1668c0f26e527bd3
     restart: unless-stopped
     depends_on: [docker-proxy]
     read_only: true
