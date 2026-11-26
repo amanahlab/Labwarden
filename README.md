@@ -1,7 +1,7 @@
 <h1>
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/masters/labwarden-horizontal-reversed.svg">
-    <img src="docs/brand/masters/labwarden-horizontal-color.svg" alt="LabWarden" width="320">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/exports/readme/labwarden-horizontal-on-ink.svg">
+    <img src="docs/brand/exports/readme/labwarden-horizontal-on-paper.svg" alt="LabWarden" width="320">
   </picture>
 </h1>
 
