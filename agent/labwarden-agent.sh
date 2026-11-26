@@ -24,7 +24,8 @@
 #   LABWARDEN_SPOOL        directory for SBOMs that failed to upload (default: $LABWARDEN_STATE/spool)
 set -u
 
-AGENT_VERSION="3.2.0"
+# Set by release-please to the LabWarden release version.
+AGENT_VERSION="0.3.0" # x-release-please-version
 
 # The configuration is sourced as shell code, so only a file that nobody else
 # can have written is trusted: owned by root (or this user), not group- or
