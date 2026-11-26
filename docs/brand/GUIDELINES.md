@@ -61,6 +61,7 @@ Keep Signal for the alert light only. Don't colour the tower orange. Signal pair
 - `masters/`: master SVGs (paths only, no live text, no effects)
 - `exports/one-colour/`: black, white and orange one-colour SVGs
 - `exports/png/`: full-colour PNGs for slides and documents
+- `exports/readme/`: the horizontal lockup on its own Paper or Ink tile, with clear space, for the GitHub README. GitHub may show either version on either page colour (a `<picture>` source follows the browser's colour preference, which can differ from the GitHub theme), so each tile carries its own background and stays readable on both. Built by wrapping the two horizontal masters: a 958.07 × 280 viewBox, a 24-radius rectangle, and the master's paths moved by 48 on each axis.
 - `src/`: Python scripts (standard library only) that regenerate every SVG in `masters/` from exact geometry. They write only to `masters/`. Run them in a container from the repo root:
 
   ```bash
