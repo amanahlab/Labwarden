@@ -27,3 +27,6 @@ screenshots/
 
 # registry credentials for the dashboard (docs/setup/server-docker-compose.md)
 registry-auth/
+
+# agent benchmark results and image tars (scripts/agent-bench.sh)
+bench/

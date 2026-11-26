@@ -141,6 +141,38 @@ check "the second run left them out" 1 grep -q images "$WORK/sent1.json"
 check "the fallback was logged" 0 grep -q "^warn .*without it" "$WORK/log"
 rm -rf "$WORK"
 
+# What reaches Syft in a whole agent run (stub syft, unreachable dashboard):
+# no file hashes and GOGC=50 unless configured, at low priority.
+SY=$(mktemp -d)
+cat >"$SY/syft" <<EOT
+#!/bin/sh
+[ "\$1" = version ] && exit 0
+echo "\${SYFT_FILE_METADATA_SELECTION:-unset} \${GOGC:-unset} \$(nice)" >"$SY/env"
+echo '{}'
+EOT
+chmod +x "$SY/syft"
+syft_run() { # syft_run [VAR=value...]: one agent run, prints what syft saw
+	rm -f "$SY/env"
+	env -u GOGC -u SYFT_FILE_METADATA_SELECTION "$@" SYFT="$SY/syft" LABWARDEN_STATE="$SY/state" ENV_FILE=/nonexistent \
+		LABWARDEN_URL=http://127.0.0.1:9 LABWARDEN_TOKEN=vxe_0123456789abcdef0123 LABWARDEN_SCAN_PATHS="$SY" \
+		LABWARDEN_SCAN_DOCKER=false sh agent/labwarden-agent.sh >/dev/null 2>&1
+	cat "$SY/env"
+}
+check "syft runs without file hashes, with GOGC=50, at nice 10" 0 test "$(syft_run)" = "none 50 10"
+check "configured file selection and GOGC win" 0 test "$(syft_run SYFT_FILE_METADATA_SELECTION=all GOGC=100)" = "all 100 10"
+check "GOGC reaches syft only" 0 sh -c "! grep -q '^export GOGC\|^GOGC=' agent/labwarden-agent.sh"
+rm -rf "$SY"
+
+# The scan runs at a lower priority, unless the scheduler already lowered the
+# agent (the systemd unit sets Nice=10).
+lc=$(sed -n '/^lower_cmd()/,/^}/p' agent/labwarden-agent.sh)
+check "lower_cmd lowers a normal-priority agent" 0 sh -c "$lc
+case \"\$(lower_cmd)\" in 'nice -n 10' | 'nice -n 10 ionice -c 3') ;; *) exit 1 ;; esac"
+check "lower_cmd leaves an already lowered agent alone" 0 nice -n 10 sh -c "$lc
+[ -z \"\$(lower_cmd)\" ]"
+check "a lowered command still runs" 0 sh -c "$lc
+\$(lower_cmd) true"
+
 # A restarted container often hands the new run the pid of the run that was
 # killed holding the lock; exec keeps $$, so the lock names the agent itself.
 check "a lock holding the agent's own pid is stale" 0 sh -c '
