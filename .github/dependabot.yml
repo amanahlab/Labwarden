@@ -8,6 +8,11 @@
 # in scripts/, our own ghcr.io/amanahlab images (the post-release pin PR) and
 # the agent snippets in web/src/lib/agent.ts.
 #
+# Commit prefixes decide releases (release-please.yml): what ships in our images
+# (base images, Go modules, web runtime npm) uses fix(deps) and so produces a
+# release; actions, Compose and npm dev dependencies use ci/chore and wait for
+# the next release.
+#
 # A golang bump in the Dockerfile also needs the same ref in scripts/go.sh;
 # ci.yml fails until both match. Node stays on its LTS line (scripts/npm.sh
 # uses the same major): majors of node and @types/node are bumped by hand.
@@ -29,7 +34,8 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: chore
+      prefix: fix
+      include: scope
     groups:
       base-images:
         patterns: ["*"]
@@ -54,7 +60,8 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: chore
+      prefix: fix
+      include: scope
     groups:
       go-modules:
         patterns: ["*"]
@@ -65,7 +72,9 @@ updates:
     schedule:
       interval: weekly
     commit-message:
-      prefix: chore
+      prefix: fix
+      prefix-development: chore
+      include: scope
     groups:
       web:
         patterns: ["*"]

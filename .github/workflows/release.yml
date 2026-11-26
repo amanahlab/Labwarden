@@ -1,19 +1,21 @@
 name: release
 
-# Publishes the multi-arch (amd64 + arm64) server and agent images to GHCR when
-# a vX.Y.Z tag is pushed. workflow_dispatch reruns a release without retagging:
-# pick the tag under "Use workflow from". Dispatching from a branch fails on
-# purpose, and re-dispatching an older tag moves `latest` back to it.
+# Publishes the multi-arch (amd64 + arm64) server and agent images to GHCR for
+# a vX.Y.Z tag. Normally release-please.yml dispatches it on the tag it created
+# when a release PR merged (a tag made with GITHUB_TOKEN starts no push run).
+# A tag pushed by hand still runs it, as a fallback. workflow_dispatch also
+# reruns a release without retagging: pick the tag under "Use workflow from".
+# Dispatching from a branch fails on purpose, and re-dispatching an older tag
+# moves `latest` back to it.
 #
 # The agent is published first, and the dashboard build embeds that agent's
 # tag@index digest in its agent snippets, so each release shows its own agent.
 #
-# After each release, a follow-up PR pins the new tag and its multi-arch INDEX
-# digest wherever the old one appears (git grep -n 'ghcr.io/amanahlab/labwarden'),
-# found with docker buildx imagetools inspect, or read from the GitHub Release the
-# github-release job creates. Never pin a platform digest: the index also lists
-# unknown/unknown attestation entries, and a platform digest would lock every
-# host to one architecture.
+# Then github-release adds both tag@index digests to the release notes and
+# publishes the release, and pin-pr opens the follow-up PR that pins them
+# wherever the old ones appear. Never pin a platform digest: the index also
+# lists unknown/unknown attestation entries, and a platform digest would lock
+# every host to one architecture.
 #
 # Both indexes get a signed SLSA build provenance attestation (actions/attest),
 # which users check with: gh attestation verify oci://<image>@<digest> --repo amanahlab/Labwarden
@@ -144,9 +146,12 @@ jobs:
           subject-digest: ${{ steps.server.outputs.digest }}
           push-to-registry: true
 
-  # The GitHub Release for the tag: both images by tag and index digest, how to
-  # verify them, then GitHub's generated notes. A rerun (workflow_dispatch)
-  # pushes new digests, so it rewrites the notes of the existing release.
+  # The GitHub Release for the tag: both images by tag and index digest and how
+  # to verify them, between two markers, above the release notes. A release
+  # from release-please already exists as a draft whose body is the changelog;
+  # this job adds the images and publishes it. A tag pushed by hand has no
+  # release yet, so it gets one with GitHub's generated notes. A rerun
+  # (workflow_dispatch) pushes new digests and replaces the marked block only.
   github-release:
     needs: release
     runs-on: ubuntu-24.04
@@ -160,12 +165,8 @@ jobs:
       AGENT: ${{ needs.release.outputs.agent }}
     steps:
       - run: |
-          # The newest stable tag below this one; empty for the first release.
-          # TAG joins the list so a prerelease (not stable) still finds its place.
-          prev=$({ gh api "repos/$GH_REPO/tags" --paginate --jq '.[].name' |
-            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'; echo "$TAG"; } | sort -uV |
-            awk -v t="$TAG" '$0 == t { exit } { p = $0 } END { print p }')
           {
+            echo "<!-- labwarden:images -->"
             echo "## Images"
             echo
             echo "Pin them by tag and multi-arch index digest:"
@@ -183,14 +184,115 @@ jobs:
             echo "gh attestation verify oci://${SERVER%%:*}@${SERVER#*@} --repo $GH_REPO"
             echo "gh attestation verify oci://${AGENT%%:*}@${AGENT#*@} --repo $GH_REPO"
             echo '```'
+            echo "<!-- /labwarden:images -->"
             echo
+          } > images.md
+
+          # The releases list includes drafts; the by-tag endpoint does not.
+          id=$(gh api "repos/$GH_REPO/releases" --paginate \
+            --jq '.[] | select(.tag_name == env.TAG) | .id' | head -n 1)
+          if [ -n "$id" ]; then
+            gh api "repos/$GH_REPO/releases/$id" --jq '.body // ""' |
+              sed '/^<!-- labwarden:images -->$/,/^<!-- \/labwarden:images -->$/d' > body.md
+          else
+            : > body.md
+          fi
+          if ! grep -q '[^[:space:]]' body.md; then
+            # The newest stable tag below this one; empty for the first release.
+            # TAG joins the list so a prerelease (not stable) still finds its place.
+            prev=$({ gh api "repos/$GH_REPO/tags" --paginate --jq '.[].name' |
+              grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$'; echo "$TAG"; } | sort -uV |
+              awk -v t="$TAG" '$0 == t { exit } { p = $0 } END { print p }')
             gh api "repos/$GH_REPO/releases/generate-notes" -f tag_name="$TAG" \
-              ${prev:+-f previous_tag_name="$prev"} --jq .body
-          } > notes.md
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --notes-file notes.md
+              ${prev:+-f previous_tag_name="$prev"} --jq .body > body.md
+          fi
+          cat images.md body.md > notes.md
+
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GH_REPO/releases/$id" -F body=@notes.md -F draft=false --silent
           else
             case "$TAG" in *-*) pre=--prerelease ;; *) pre= ;; esac
             # shellcheck disable=SC2086 # $pre is one flag or nothing
             gh release create "$TAG" --verify-tag --title "$TAG" --notes-file notes.md $pre
           fi
+
+  # The follow-up pin PR: the new tag@index digests replace the old ones in
+  # docker-compose.yml (dashboard) and README.md, docs/setup/agent-docker.md and
+  # the fallback in web/src/lib/agent.ts (agent). Only for the newest stable tag,
+  # so re-dispatching an older release or a pre-release never moves the pins.
+  # A rerun adds a commit to the existing branch. A push made with GITHUB_TOKEN
+  # starts no pull_request run, so the job dispatches ci.yml on the branch.
+  # No tests or npm here: this job holds contents: write.
+  pin-pr:
+    needs: [release, github-release]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write # dispatch ci.yml
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      SERVER: ${{ needs.release.outputs.server }}
+      AGENT: ${{ needs.release.outputs.agent }}
+    steps:
+      - id: newest
+        run: |
+          newest=$(gh api "repos/$GH_REPO/tags" --paginate --jq '.[].name' |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+          if [ "$newest" = "$TAG" ]; then
+            echo "pin=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::$TAG is not the newest stable tag ($newest); pins stay as they are"
+          fi
+      - if: steps.newest.outputs.pin == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+      - if: steps.newest.outputs.pin == 'true'
+        run: |
+          branch="chore/pin-$TAG"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            git fetch --depth 1 origin "$branch"
+            git switch -c "$branch" FETCH_HEAD
+          else
+            git switch -c "$branch"
+          fi
+
+          ref='[^@"[:space:]]+@sha256:[0-9a-f]{64}'
+          sed -i -E "s#ghcr\.io/amanahlab/labwarden:$ref#$SERVER#g" docker-compose.yml
+          sed -i -E "s#ghcr\.io/amanahlab/labwarden-agent:$ref#$AGENT#g" \
+            README.md docs/setup/agent-docker.md web/src/lib/agent.ts
+          # Every file must now hold the new pin: a file that lost its old
+          # pin (moved, reworded) is a pin this job would silently skip.
+          for pair in "docker-compose.yml|$SERVER" "README.md|$AGENT" \
+              "docs/setup/agent-docker.md|$AGENT" "web/src/lib/agent.ts|$AGENT"; do
+            if ! grep -qF "${pair#*|}" "${pair%%|*}"; then
+              echo "::error::${pair%%|*} has no ${pair#*|} after the update; pin it by hand"
+              exit 1
+            fi
+          done
+          if git diff --quiet; then
+            echo "::notice::$branch already pins these digests"
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -qam "chore: pin $TAG images by tag and index digest"
+          git push origin "$branch"
+
+          if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[].number')" ]; then
+            {
+              echo "Follow-up to the $TAG release. Pins the new tag and multi-arch index digest:"
+              echo
+              echo "- \`$SERVER\` in \`docker-compose.yml\`"
+              echo "- \`$AGENT\` in \`README.md\`, \`docs/setup/agent-docker.md\` and the fallback in \`web/src/lib/agent.ts\`"
+              echo
+              echo "Opened by the release workflow ($GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID)."
+            } > pr.md
+            gh pr create --base main --head "$branch" \
+              --title "chore: pin $TAG images by tag and index digest" --body-file pr.md
+          fi
+          gh workflow run ci.yml --ref "$branch"

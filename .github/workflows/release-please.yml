@@ -1,0 +1,56 @@
+name: release-please
+
+# Keeps one open release PR ("chore: release X.Y.Z") with the next version,
+# CHANGELOG.md and AGENT_VERSION, worked out from the conventional commits on
+# main (release-please-config.json, .release-please-manifest.json). Merging it
+# creates the tag vX.Y.Z and a draft GitHub Release with the changelog;
+# release.yml then publishes the images, adds them to the notes and publishes
+# the draft.
+#
+# Tags and PRs made with GITHUB_TOKEN start no workflows, except a
+# workflow_dispatch. So this job dispatches release.yml on the new tag and
+# ci.yml on the release PR branch. The repository setting "Allow GitHub Actions
+# to create and approve pull requests" must be on for release-please to open
+# its PR.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # tag, draft release, release PR branch
+      pull-requests: write
+      issues: write # autorelease labels
+      actions: write # dispatch release.yml and ci.yml
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+      - name: Publish the release (release.yml on the new tag)
+        if: steps.rp.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.rp.outputs.tag_name }}
+        run: gh workflow run release.yml --ref "$TAG"
+      - name: Run CI on the release PR
+        if: steps.rp.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.rp.outputs.pr }}
+        run: |
+          branch=$(jq -r '.headBranchName // empty' <<< "$PR")
+          if [ -z "$branch" ]; then
+            echo "::warning::release-please reported a PR but no branch name; CI not dispatched"
+            exit 0
+          fi
+          gh workflow run ci.yml --ref "$branch"

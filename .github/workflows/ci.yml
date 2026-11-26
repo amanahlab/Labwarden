@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # release-please.yml and the pin PR job dispatch this on their branches:
+  # pushes made with GITHUB_TOKEN start no pull_request run.
+  workflow_dispatch:
 
 permissions:
   contents: read
