@@ -99,6 +99,7 @@ Keep the volume: it holds the credential. If you delete it, click **Reset creden
 | `LABWARDEN_GROUP` | `default` | Group shown in the dashboard |
 | `LABWARDEN_INTERVAL` | `21600` | Seconds between scans |
 | `LABWARDEN_DOCKER_LABEL` | none | Only scan containers with this label, such as `labwarden.scan=true` |
+| `LABWARDEN_RESCAN_DAYS` | `7` | Days before an image that hasn't changed is scanned again. The dashboard keeps each image's package list and checks it against every new vulnerability database, so new vulnerabilities still show up in between. `0` scans every image on every run. |
 | `LABWARDEN_CA_FILE` | none | CA certificate to trust for the dashboard (see below) |
 | `TZ` | UTC | Time zone for the log |
 

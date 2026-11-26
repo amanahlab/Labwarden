@@ -12,6 +12,8 @@
 #           LABWARDEN_SCHEDULE (systemd OnCalendar, default every 6h),
 #           LABWARDEN_CRON (cron expression used when systemd is absent),
 #           LABWARDEN_INTERVAL (seconds; must match the schedule, default 21600),
+#           LABWARDEN_RESCAN_DAYS (days before an unchanged container image is
+#           cataloged again, default 7, 0 = every run),
 #           LABWARDEN_RUN_NOW=0 to skip the first scan.
 # Uninstall: sudo sh lw-install.sh --uninstall
 set -eu
@@ -61,6 +63,8 @@ validate() {
 	! has_ctrl "${LABWARDEN_SCAN_PATHS:-}" || die "LABWARDEN_SCAN_PATHS must not contain control characters"
 	matches "${LABWARDEN_SCAN_DOCKER:-auto}" 'auto|true|false' || die "LABWARDEN_SCAN_DOCKER must be auto, true or false"
 	matches "${LABWARDEN_INTERVAL:-21600}" '[0-9]{1,7}' || die "LABWARDEN_INTERVAL must be a number of seconds"
+	[ -z "${LABWARDEN_RESCAN_DAYS:-}" ] || matches "$LABWARDEN_RESCAN_DAYS" '0|[1-9][0-9]{0,3}' ||
+		die "LABWARDEN_RESCAN_DAYS must be a number of days"
 	[ -z "${LABWARDEN_SCHEDULE:-}" ] || matches "$LABWARDEN_SCHEDULE" '[A-Za-z0-9*:/,. ~-]{1,100}' ||
 		die "LABWARDEN_SCHEDULE must be a systemd OnCalendar expression"
 	[ -z "${LABWARDEN_CRON:-}" ] || matches "$LABWARDEN_CRON" '[0-9*/,-]+( [0-9*/,-]+){4}' ||
@@ -168,6 +172,7 @@ umask 077
 	printf 'LABWARDEN_INTERVAL=%s\n' "$(shq "${LABWARDEN_INTERVAL:-21600}")"
 	[ -n "${LABWARDEN_CA_FILE:-}" ] && printf 'LABWARDEN_CA_FILE=%s\n' "$(shq "$CONF_DIR/ca.pem")"
 	[ -n "${LABWARDEN_DOCKER_URL:-}" ] && printf 'LABWARDEN_DOCKER_URL=%s\n' "$(shq "$LABWARDEN_DOCKER_URL")"
+	[ -n "${LABWARDEN_RESCAN_DAYS:-}" ] && printf 'LABWARDEN_RESCAN_DAYS=%s\n' "$(shq "$LABWARDEN_RESCAN_DAYS")"
 	printf "PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'\n"
 } >"$CONF_DIR/agent.env"
 chown 0:0 "$CONF_DIR/agent.env"

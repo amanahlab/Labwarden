@@ -56,7 +56,8 @@ matched_since() { # matched_since <host> <time>: a server-side match received af
 }
 agent_matched_within() { # agent_matched_within <seconds> <service:host>: run the agent, wait for its match
   since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  out=$(docker compose --profile testbed exec -T "${2%%:*}" labwarden-agent 2>&1) || true
+  # RESCAN_DAYS=0: catalog even an image the agent uploaded on an earlier run.
+  out=$(docker compose --profile testbed exec -T -e LABWARDEN_RESCAN_DAYS=0 "${2%%:*}" labwarden-agent 2>&1) || true
   case "$out" in
   *"another labwarden-agent run"*) wait_for 900 "${2#*:} SBOM matched (scheduled run)" matched_since "${2#*:}" "$since" ;;
   *"uploaded "*) wait_for "$1" "${2#*:} SBOM matched within $1 s of upload" matched_since "${2#*:}" "$since" ;;
@@ -194,6 +195,17 @@ docker compose --profile testbed stop testbed-workload >/dev/null
 wait_for 300 "workload image retired after it stopped running" workload_retired true
 docker compose --profile testbed start testbed-workload >/dev/null
 wait_for 300 "workload image back after it started again" workload_retired false
+
+echo "== unchanged image not cataloged again"
+# The workload just came back and was uploaded, so the next run skips it and
+# its target stays active.
+out=$(docker compose --profile testbed exec -T testbed-docker-agent labwarden-agent 2>&1) || true
+printf '%s\n' "$out" | grep -q "labwarden-testbed-workload:latest has not changed" ||
+  { printf '%s\n' "$out" | tail -n 20 >&2; fail "agent cataloged the unchanged workload image again"; }
+api "$URL/api/v1/hosts/$DID" | jqr -e \
+  '[.targets[] | select(.name == "labwarden-testbed-workload:latest") | .retired_at == ""] | (length > 0 and all)' >/dev/null ||
+  fail "skipping the unchanged workload image retired its target"
+pass "unchanged image skipped, its target still active"
 
 echo "== one vulnerability DB"
 for svc in testbed-vm testbed-docker-agent; do

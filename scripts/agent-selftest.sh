@@ -21,13 +21,17 @@ nl='
 good() {
 	LABWARDEN_URL=http://labwarden.lan:8080 LABWARDEN_TOKEN=vxe_0123456789abcdef0123
 	LABWARDEN_HOST='' LABWARDEN_GROUP='' LABWARDEN_CRON='' LABWARDEN_SCHEDULE='' LABWARDEN_SCAN_PATHS='' LABWARDEN_INTERVAL=''
-	LABWARDEN_SCAN_DOCKER='' LABWARDEN_DOCKER_URL='' LABWARDEN_CA_FILE=''
+	LABWARDEN_SCAN_DOCKER='' LABWARDEN_DOCKER_URL='' LABWARDEN_CA_FILE='' LABWARDEN_RESCAN_DAYS=''
 }
 with() { good && eval "$1" && validate; } # with <assignments>: validate a good config changed by them
 check "good settings pass" 0 with ':'
 check "https URL and IPv6 host pass" 0 with 'LABWARDEN_URL=https://[fd00::1]:8443/labwarden'
 check "a group with a quote passes (it is quoted)" 0 with "LABWARDEN_GROUP=\"bob's lab\""
 check "cron with five fields passes" 0 with 'LABWARDEN_CRON="5 */6 * * 1-5"'
+check "rescan days as a number pass" 0 with 'LABWARDEN_RESCAN_DAYS=14'
+check "rescan days with shell code fail" 1 with 'LABWARDEN_RESCAN_DAYS="7;id"'
+check "rescan days with a leading zero fail (octal in shell arithmetic)" 1 with 'LABWARDEN_RESCAN_DAYS=08'
+check "rescan days of 0 pass" 0 with 'LABWARDEN_RESCAN_DAYS=0'
 check "systemd calendar passes" 0 with 'LABWARDEN_SCHEDULE="*-*-* 00/6:00:00"'
 check "ftp URL fails" 1 with 'LABWARDEN_URL=ftp://x'
 check "URL with a quote fails" 1 with "LABWARDEN_URL=\"http://x/'\""
@@ -180,5 +184,125 @@ check "a lock holding the agent's own pid is stale" 0 sh -c '
 	sh -c "echo \$\$ >/tmp/lws/agent.lock/pid && LABWARDEN_STATE=/tmp/lws LABWARDEN_URL=http://127.0.0.1:9 \
 		LABWARDEN_TOKEN=vxe_0123456789abcdef0123 ENV_FILE=/nonexistent exec sh agent/labwarden-agent.sh" >/tmp/lws/out 2>&1
 	grep -q "removing stale lock" /tmp/lws/out'
+
+# The unchanged-image cache, through whole agent runs with stub docker, syft
+# and curl: an image is cataloged again only when it changed, came back, failed
+# to upload, expired, or the tools or the credential changed.
+STUB=$(mktemp -d)
+export STUB
+mkdir "$STUB/bin" "$STUB/state"
+cat >"$STUB/bin/docker" <<'EOT'
+#!/bin/sh
+case "$1 $2" in
+"ps -q") cut -d' ' -f1 "$STUB/containers" ;;
+"inspect --format")
+	case "$3" in "{{.Image}} {{.Id}} {{.Config.Image}}") grep "^$4 " "$STUB/containers" | awk '{print $2, $1, $3}' ;; *) exit 1 ;; esac ;;
+"image inspect") eval "n=\${$#}" && awk -v n="$n" '$3 == n {print $2}' "$STUB/containers" | head -n1 ;;
+"save -o") echo tar >"$3" ;;
+*) exit 1 ;;
+esac
+EOT
+cat >"$STUB/bin/syft" <<'EOT'
+#!/bin/sh
+[ "$1" = version ] && echo "Version: $(cat "$STUB/syft-version")" && exit 0
+echo "$2" >>"$STUB/cataloged" && echo '{}'
+EOT
+cat >"$STUB/bin/curl" <<'EOT'
+#!/bin/sh
+out="" w="" url=""
+while [ $# -gt 0 ]; do
+	case "$1" in -o) out=$2 && shift ;; -w) w=1 ;; http*) url=$1 ;; esac
+	shift
+done
+case "$url" in
+*/ingest/enroll) printf '{"credential":"vxa_new"}' >"$out" && printf 201 && exit 0 ;;
+*/ingest/sbom*)
+	[ -e "$STUB/fail-once" ] && rm "$STUB/fail-once" && { [ -n "$w" ] && printf 503; exit 22; }
+	[ -e "$STUB/fail" ] && { [ -n "$w" ] && printf 503; exit 22; } ;;
+esac
+[ -n "$w" ] && printf 202
+exit 0
+EOT
+chmod +x "$STUB/bin/"*
+echo 1.0.0 >"$STUB/syft-version"
+printf 'vxa_old' >"$STUB/state/credential" && printf h >"$STUB/state/credential.host"
+agent_run() { # agent_run [VAR=value...]: one run; leaves what Syft cataloged in $STUB/cataloged
+	: >"$STUB/cataloged"
+	env PATH="$STUB/bin:$PATH" LABWARDEN_URL=http://127.0.0.1:9 LABWARDEN_STATE="$STUB/state" LABWARDEN_HOST=h \
+		LABWARDEN_TOKEN=vxe_0123456789abcdef0123 LABWARDEN_SCAN_PATHS='' LABWARDEN_SCAN_DOCKER=true "$@" \
+		sh agent/labwarden-agent.sh >"$STUB/out" 2>&1
+}
+cataloged() { [ "$(sort "$STUB/cataloged" | tr '\n' ' ')" = "$1" ]; }
+printf 'c1 sha256:i1 nginx:1\nc2 sha256:i2 redis:7\n' >"$STUB/containers"
+agent_run
+check "cache: the first run catalogs every image" 0 cataloged "docker:nginx:1 docker:redis:7 "
+agent_run
+check "cache: an unchanged image is not cataloged again" 0 cataloged ""
+check "cache: the run counts it as unchanged" 0 grep -q "2 unchanged" "$STUB/out"
+printf 'c1 sha256:i1 nginx:1\nc2 sha256:i3 redis:7\n' >"$STUB/containers"
+agent_run
+check "cache: a new image ID is cataloged" 0 cataloged "docker:redis:7 "
+printf 'c1 sha256:i1 nginx:latest\nc2 sha256:i3 redis:7\n' >"$STUB/containers"
+agent_run
+check "cache: a new name is cataloged" 0 cataloged "docker:nginx:latest "
+printf 'c2 sha256:i3 redis:7\n' >"$STUB/containers"
+agent_run
+printf 'c1 sha256:i1 nginx:latest\nc2 sha256:i3 redis:7\n' >"$STUB/containers"
+agent_run
+check "cache: an image that comes back is cataloged (its target was retired)" 0 cataloged "docker:nginx:latest "
+agent_run LABWARDEN_RESCAN_DAYS=0
+check "cache: LABWARDEN_RESCAN_DAYS=0 catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+agent_run LABWARDEN_RESCAN_DAYS=08
+check "cache: a malformed LABWARDEN_RESCAN_DAYS catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+sed -i 's/^\(sha256:i3 [^ ]*\) [0-9]*/\1 1/' "$STUB/state/scanned"
+agent_run
+check "cache: an expired image is cataloged" 0 cataloged "docker:redis:7 "
+echo 1.1.0 >"$STUB/syft-version"
+agent_run
+check "cache: a new Syft catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+agent_run SYFT_FILE_METADATA_SELECTION="owned-by-package x"
+check "cache: another Syft file selection catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+agent_run
+check "cache: back to the default file selection catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+printf 'c1 sha256:i1 nginx:latest\nc2 sha256:i4 redis:7\n' >"$STUB/containers"
+touch "$STUB/fail"
+agent_run
+rm "$STUB/fail"
+rm -r "$STUB/state/spool" # its upload would catalog every image (tested below)
+agent_run
+check "cache: a failed upload is cataloged again" 0 cataloged "docker:redis:7 "
+rm "$STUB/state/credential" "$STUB/state/credential.host"
+agent_run
+check "cache: enrolling again catalogs every image" 0 cataloged "docker:nginx:latest docker:redis:7 "
+# A rolling update: two running images under one name, which the dashboard
+# keeps one SBOM for. The one whose tag moved is scanned from an export.
+printf 'c1 sha256:i1 nginx:latest\nc2 sha256:i4 redis:7\nc3 sha256:i5 redis:7\n' >"$STUB/containers"
+redis_both() { [ "$(grep -c . "$STUB/cataloged")" = 2 ] && grep -qx docker:redis:7 "$STUB/cataloged" && grep -q '^docker-archive:' "$STUB/cataloged"; }
+agent_run
+check "cache: two running images under one name are both cataloged" 0 redis_both
+agent_run
+check "cache: images that share a name are cataloged on every run" 0 redis_both
+printf 'c1 sha256:i1 nginx:latest\nc3 sha256:i5 redis:7\n' >"$STUB/containers"
+agent_run
+check "cache: the image left under a shared name is cataloged again" 0 cataloged "docker:redis:7 "
+agent_run
+check "cache: then it is unchanged" 0 cataloged ""
+# Docker scanning paused for a run retires the images' targets.
+agent_run LABWARDEN_SCAN_DOCKER=false
+agent_run
+check "cache: images are cataloged again after a run without Docker scanning" 0 cataloged "docker:nginx:latest docker:redis:7 "
+# A spooled SBOM that reaches the dashboard late replaces the newer one under
+# its name, so the images are cataloged again after it.
+printf 'c1 sha256:i1 nginx:latest\nc3 sha256:i6 redis:7\n' >"$STUB/containers"
+touch "$STUB/fail"
+agent_run
+rm "$STUB/fail"
+printf 'c1 sha256:i1 nginx:latest\nc3 sha256:i7 redis:7\n' >"$STUB/containers"
+touch "$STUB/fail-once" # the spooled upload fails, the newer image's goes through
+agent_run
+check "cache: a spooled upload that fails again stays spooled" 0 test -n "$(ls "$STUB/state/spool")"
+agent_run
+check "cache: images are cataloged again after a late spooled upload" 0 cataloged "docker:nginx:latest docker:redis:7 "
+rm -rf "$STUB"
 
 [ "$fails" -eq 0 ] || { echo "$fails check(s) failed" && exit 1; }

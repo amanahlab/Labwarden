@@ -88,6 +88,7 @@ Pass these on the installer's command line, next to `LABWARDEN_URL` and `LABWARD
 | `LABWARDEN_CRON` | every 6 hours at a random minute | cron schedule, used without systemd |
 | `LABWARDEN_INTERVAL` | `21600` | Seconds between scans. If you change the schedule, change this to match, so the dashboard knows when a host has gone quiet. |
 | `LABWARDEN_CA_FILE` | none | CA certificate to trust for the dashboard |
+| `LABWARDEN_RESCAN_DAYS` | `7` | With Docker scanning: days before a container image that hasn't changed is scanned again. The dashboard keeps each image's package list and checks it against every new vulnerability database, so new vulnerabilities still show up in between. `0` scans every image on every run. The filesystem is scanned on every run. |
 | `LABWARDEN_RUN_NOW` | `1` | Set to `0` to skip the first scan |
 
 Example: scan only `/opt` and `/srv` once a day at 02:00, in the group `media`:
